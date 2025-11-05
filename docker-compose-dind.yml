@@ -37,7 +37,7 @@ services:
       - ./config:/host-config:ro           # Mount host config folder (read-only)
       - ./logs:/host-logs                  # Mount host logs folder (read-write)
     networks:
-      - wordpress-dind-network
+      - wp-dind
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "docker", "info"]
@@ -47,7 +47,8 @@ services:
       start_period: 40s
 
 networks:
-  wordpress-dind-network:
+  wp-dind:
+    name: wp-dind
     driver: bridge
     ipam:
       config:

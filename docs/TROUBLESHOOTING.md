@@ -311,7 +311,7 @@ Install WP Mail SMTP plugin and configure:
 
 ```bash
 # Connect WordPress to DinD network
-docker network connect wordpress-dind-network mysite-wordpress
+docker network connect wp-dind mysite-wordpress
 ```
 
 **Solution 3: Use wp-config.php**
@@ -575,7 +575,7 @@ docker stats --no-stream
 
 # Network information
 docker network ls
-docker network inspect wordpress-dind-network
+docker network inspect wp-dind
 
 # Volume information
 docker volume ls

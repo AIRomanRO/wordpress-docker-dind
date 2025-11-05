@@ -17,31 +17,44 @@ The host system's network that connects to the outside world.
 **Exposed Ports**:
 - `2375`: Docker daemon (DinD container)
 - `8000-8099`: WordPress instances (dynamically assigned)
-- `8080`: phpMyAdmin
-- `1080`: MailCatcher Web UI
-- `1025`: MailCatcher SMTP
+- `8080`: phpMyAdmin (inside DinD)
+- `1080`: MailCatcher Web UI (inside DinD)
+- `1025`: MailCatcher SMTP (inside DinD)
+- `6379`: Redis (inside DinD)
+- `8082`: Redis Commander (inside DinD, mapped from internal port 8081)
 
-### Layer 2: DinD Bridge Network
+### Layer 2: External Bridge Network (Host to DinD)
 
-**Name**: `wordpress-dind-network`  
-**Subnet**: `172.19.0.0/16`  
+**Name**: `wp-dind`
+**Subnet**: `172.19.0.0/16`
 **Driver**: bridge
 
-**Purpose**: Connects the DinD container with support services (phpMyAdmin, MailCatcher)
+**Purpose**: Connects the DinD container with support services (phpMyAdmin, MailCatcher) and provides network access from the host machine
 
 **Connected Services**:
 - wordpress-dind-host
-- phpmyadmin
-- mailcatcher
+- phpmyadmin (optional, if running outside DinD)
+- mailcatcher (optional, if running outside DinD)
 
 **Configuration** (docker-compose.yml):
 ```yaml
 networks:
-  wordpress-dind-network:
+  wp-dind:
+    name: wp-dind
     driver: bridge
     ipam:
       config:
         - subnet: 172.19.0.0/16
+```
+
+**Access Pattern**:
+Services running inside the DinD container are accessible from the host via:
+1. **Published ports**: Access via `localhost:<port>` (e.g., `http://localhost:8080` for phpMyAdmin)
+2. **DinD container IP**: Access via `<dind-ip>:<port>` on the `wp-dind` network
+
+To get the DinD container IP:
+```bash
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' wordpress-dind-host
 ```
 
 ### Layer 3: Shared Network (Inside DinD)
@@ -89,6 +102,201 @@ docker network create \
   --opt com.docker.network.bridge.name=wp-br-1 \
   wp-network-1
 ```
+
+## Network Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────-──┐
+│                         Host Machine                           │
+│                                                                │
+│  Access via localhost:                                         │
+│  - http://localhost:8080 (phpMyAdmin)                          │
+│  - http://localhost:1080 (MailCatcher)                         │
+│  - http://localhost:8000-8099 (WordPress instances)            │
+│                                                                │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              wp-dind Network (172.19.0.0/16)              │ │
+│  │                                                           │ │
+│  │  ┌─────────────────────────────────────────────────────┐  │ │
+│  │  │         DinD Container (wordpress-dind-host)        │  │ │
+│  │  │                                                     │  │ │
+│  │  │  Services running inside DinD:                      │  │ │
+│  │  │  - phpMyAdmin (port 8080)                           │  │ │
+│  │  │  - MailCatcher (ports 1080, 1025)                   │  │ │
+│  │  │  - Redis (port 6379)                                │  │ │
+│  │  │  - Redis Commander (port 8081)                      │  │ │
+│  │  │                                                     │  │ │
+│  │  │  ┌────────────────────────────────────────────────┐ │  │ │
+│  │  │  │  wp-network-1 (172.20.1.0/24)                  │ │  │ │
+│  │  │  │  ├── MySQL (172.20.1.2)                        │ │  │ │
+│  │  │  │  ├── PHP-FPM (172.20.1.3)                      │ │  │ │
+│  │  │  │  └── Nginx (172.20.1.4) → port 8001            │ │  │ │
+│  │  │  └────────────────────────────────────────────────┘ │  │ │
+│  │  │                                                     │  │ │
+│  │  │  ┌────────────────────────────────────────────────┐ │  │ │
+│  │  │  │  wp-network-2 (172.20.2.0/24)                  │ │  │ │
+│  │  │  │  ├── MySQL (172.20.2.2)                        │ │  │ │
+│  │  │  │  ├── PHP-FPM (172.20.2.3)                      │ │  │ │
+│  │  │  │  └── Nginx (172.20.2.4) → port 8002            │ │  │ │
+│  │  │  └────────────────────────────────────────────────┘ │  │ │
+│  │  │                                                     │  │ │
+│  │  │  ┌────────────────────────────────────────────────┐ │  │ │
+│  │  │  │  wp-shared (172.21.0.0/16)                     │ │  │ │
+│  │  │  │  Optional shared network for inter-instance    │ │  │ │
+│  │  │  │  communication                                 │ │  │ │
+│  │  │  └────────────────────────────────────────────────┘ │  │ │
+│  │  └─────────────────────────────────────────────────────┘  │ │
+│  │                                                           │ │
+│  │  Optional: phpMyAdmin, MailCatcher (if running outside)   │ │
+│  └───────────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Network Creation and Setup
+
+### External Network (wp-dind)
+
+The external `wp-dind` network is automatically created when you start the Docker Compose stack:
+
+```bash
+# Using docker-compose.yml
+docker-compose up -d
+
+# Using docker-compose-dind.yml
+docker-compose -f docker-compose-dind.yml up -d
+```
+
+The network is defined in the compose file and will be created with:
+- **Name**: `wp-dind`
+- **Driver**: `bridge`
+- **Subnet**: `172.19.0.0/16` (configurable via `DIND_NETWORK_SUBNET` in `.env`)
+
+**Manual creation** (if needed):
+```bash
+docker network create \
+  --driver bridge \
+  --subnet 172.19.0.0/16 \
+  wp-dind
+```
+
+### Internal Networks (Inside DinD)
+
+Internal networks for WordPress instances are automatically created by the `network-setup.sh` script when the DinD container starts (if `ENABLE_NETWORK_ISOLATION=true`).
+
+**Shared Network** (`wp-shared`):
+```bash
+# Created automatically by network-setup.sh
+docker network create \
+  --driver bridge \
+  --subnet 172.21.0.0/16 \
+  --opt com.docker.network.bridge.name=wp-shared \
+  wp-shared
+```
+
+**Instance Networks** (`wp-network-{N}`):
+```bash
+# Created automatically when you create a WordPress instance
+docker network create \
+  --driver bridge \
+  --subnet 172.20.1.0/24 \
+  --opt com.docker.network.bridge.name=wp-br-1 \
+  wp-network-1
+```
+
+## Access Patterns
+
+### Accessing Services from Host
+
+**Method 1: Via Published Ports (Recommended)**
+
+All services inside the DinD container are accessible via published ports on localhost:
+
+```bash
+# phpMyAdmin (inside DinD)
+http://localhost:8080
+
+# MailCatcher Web UI (inside DinD)
+http://localhost:1080
+
+# Redis Commander (inside DinD)
+http://localhost:8082
+
+# WordPress instance (dynamically assigned port)
+http://localhost:8001  # Example for first instance
+```
+
+**Method 2: Via DinD Container IP**
+
+You can also access services using the DinD container's IP address on the `wp-dind` network:
+
+```bash
+# Get DinD container IP
+DIND_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' wordpress-dind-host)
+
+# Access phpMyAdmin
+http://${DIND_IP}:8080
+
+# Access WordPress instance
+http://${DIND_IP}:8001
+```
+
+**Example: Complete Access Workflow**
+
+```bash
+# 1. Start the DinD environment
+docker-compose -f docker-compose-dind.yml up -d
+
+# 2. Create a WordPress instance
+docker exec wordpress-dind-host /app/instance-manager.sh create mysite 80 83 nginx
+
+# 3. Start the instance
+docker exec wordpress-dind-host /app/instance-manager.sh start mysite
+
+# 4. Get the instance info (including port)
+docker exec wordpress-dind-host /app/instance-manager.sh info mysite
+
+# 5. Access WordPress at the displayed port
+# Example: http://localhost:8001
+```
+
+### Accessing WordPress Instances
+
+WordPress instances running inside DinD are accessible via:
+
+1. **Dynamic port assignment**: Each instance gets a random port in the 8000-8099 range
+2. **Find the assigned port**:
+   ```bash
+   # Using instance manager
+   docker exec wordpress-dind-host /app/instance-manager.sh info mysite
+
+   # Using Docker directly
+   docker exec wordpress-dind-host docker port mysite-nginx 80
+   ```
+
+3. **Access the instance**:
+   ```bash
+   # If assigned port is 8001
+   http://localhost:8001
+   ```
+
+### Container-to-Container Communication
+
+**Within the same instance** (same `wp-network-{N}`):
+- Containers can communicate using service names (e.g., `mysql`, `php`, `nginx`)
+- Example: WordPress connects to MySQL using hostname `mysql`
+
+**Between different instances** (requires shared network):
+```bash
+# Connect instance to shared network
+docker exec wordpress-dind-host docker network connect wp-shared mysite1-wordpress
+docker exec wordpress-dind-host docker network connect wp-shared mysite2-wordpress
+
+# Now instances can communicate via container names
+```
+
+**From instance to DinD services** (phpMyAdmin, MailCatcher, Redis):
+- Services inside DinD are accessible via their container names
+- Example: WordPress can send emails to `mailcatcher:1025`
 
 ## Network Isolation
 
@@ -310,7 +518,8 @@ Enable IPv6 for networks:
 
 ```yaml
 networks:
-  wordpress-dind-network:
+  wp-dind:
+    name: wp-dind
     driver: bridge
     enable_ipv6: true
     ipam:

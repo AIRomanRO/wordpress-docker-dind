@@ -86,82 +86,53 @@ function saveWorkspaceConfig(targetDir, config) {
 function generateDockerCompose(targetDir, config = {}) {
     const containerName = config.workspaceName ? `wp-dind-${config.workspaceName}` : `wp-dind-${path.basename(targetDir)}`;
 
-    const composeConfig = {
-        version: '3.8',
-        services: {
-            'wordpress-dind': {
-                image: config.dindImage || 'airoman/wp-dind:dind-27.0.3',
-                container_name: containerName,
-                privileged: true,
-                environment: {
-                    ENABLE_NETWORK_ISOLATION: 'true',
-                    DOCKER_TLS_CERTDIR: ''
-                },
-                ports: [
-                    '2375:2375',
-                    '8000-8099:8000-8099'
-                ],
-                volumes: [
-                    './data/wordpress:/var/www/html',
-                    './wordpress-instances:/wordpress-instances',
-                    './shared-images:/shared-images',
-                    'dind-docker-data:/var/lib/docker'
-                ],
-                networks: ['wordpress-dind-network'],
-                restart: 'unless-stopped',
-                healthcheck: {
-                    test: ['CMD', 'docker', 'info'],
-                    interval: '30s',
-                    timeout: '10s',
-                    retries: 3,
-                    start_period: '40s'
-                }
-            }
-        },
-        networks: {
-            'wordpress-dind-network': {
-                driver: 'bridge',
-                ipam: {
-                    config: [{ subnet: '172.19.0.0/16' }]
-                }
-            }
-        },
-        volumes: {
-            'dind-docker-data': {
-                driver: 'local'
-            }
-        }
-    };
+    // Generate YAML manually to properly handle environment variable substitution
+    const composeYaml = `version: '3.8'
 
-    if (config.includePhpMyAdmin) {
-        composeConfig.services.phpmyadmin = {
-            image: 'airoman/wp-dind:phpmyadmin-5.2.3',
-            container_name: `wp-phpmyadmin-${path.basename(targetDir)}`,
-            environment: {
-                PMA_ARBITRARY: 1,
-                PMA_HOST: '',
-                PMA_PORT: 3306,
-                UPLOAD_LIMIT: '300M'
-            },
-            ports: ['8080:80'],
-            volumes: ['phpmyadmin-sessions:/sessions'],
-            networks: ['wordpress-dind-network'],
-            restart: 'unless-stopped'
-        };
-        composeConfig.volumes['phpmyadmin-sessions'] = { driver: 'local' };
-    }
+services:
+  wordpress-dind:
+    image: ${config.dindImage || 'airoman/wp-dind:dind-27.0.3'}
+    container_name: ${containerName}
+    privileged: true
+    environment:
+      ENABLE_NETWORK_ISOLATION: 'true'
+      DOCKER_TLS_CERTDIR: ''
+    ports:
+      - "\${DOCKER_DAEMON_PORT:-2375}:2375"
+      - "\${PHPMYADMIN_PORT:-8080}:8080"
+      - "\${MAILCATCHER_WEB_PORT:-1080}:1080"
+      - "\${MAILCATCHER_SMTP_PORT:-1025}:1025"
+      - "\${REDIS_PORT:-6379}:6379"
+      - "\${REDIS_COMMANDER_PORT:-8082}:8081"
+    volumes:
+      - ./data/wordpress:/var/www/html
+      - ./wordpress-instances:/wordpress-instances
+      - ./shared-images:/shared-images
+      - dind-docker-data:/var/lib/docker
+    networks:
+      - wp-dind
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-    if (config.includeMailCatcher) {
-        composeConfig.services.mailcatcher = {
-            image: 'airoman/wp-dind:mailcatcher-0.10.0',
-            container_name: `wp-mailcatcher-${path.basename(targetDir)}`,
-            ports: ['1080:1080', '1025:1025'],
-            networks: ['wordpress-dind-network'],
-            restart: 'unless-stopped'
-        };
-    }
+networks:
+  wp-dind:
+    name: wp-dind
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
 
-    return YAML.stringify(composeConfig);
+volumes:
+  dind-docker-data:
+    driver: local
+`;
+
+    return composeYaml;
 }
 
 // Commands
@@ -224,20 +195,11 @@ program
                     }
                     return true;
                 }
-            },
-            {
-                type: 'confirm',
-                name: 'includePhpMyAdmin',
-                message: 'Include phpMyAdmin for database management?',
-                default: options.withPhpmyadmin || true
-            },
-            {
-                type: 'confirm',
-                name: 'includeMailCatcher',
-                message: 'Include MailCatcher for email testing?',
-                default: options.withMailcatcher || true
             }
         ]);
+
+        // Note: phpMyAdmin, MailCatcher, Redis, and Redis Commander are always included
+        // They run inside the DinD container via supervisord
 
         const spinner = ora('Generating configuration files...').start();
 
@@ -251,8 +213,8 @@ program
                 mysqlVersions: ['5.6', '5.7', '8.0'],
                 webservers: ['nginx', 'apache'],
                 services: {
-                    phpmyadmin: answers.includePhpMyAdmin,
-                    mailcatcher: answers.includeMailCatcher,
+                    phpmyadmin: true,
+                    mailcatcher: true,
                     redis: true,
                     redisCommander: true
                 }
@@ -271,8 +233,8 @@ program
                 apache: '2.4.62',
                 redis: '7.4.1',
                 redisCommander: '0.8.1',
-                phpmyadmin: answers.includePhpMyAdmin ? '5.2.3' : null,
-                mailcatcher: answers.includeMailCatcher ? '0.10.0' : null
+                phpmyadmin: '5.2.3',
+                mailcatcher: '0.10.0'
             }
         };
 
@@ -300,11 +262,21 @@ program
 ENABLE_NETWORK_ISOLATION=true
 DOCKER_TLS_CERTDIR=
 
-# Port Configuration
-DIND_PORT=2375
+# Service Port Configuration (all services run inside DinD container)
+# Change these if you have port conflicts with other services
+DOCKER_DAEMON_PORT=2375
 PHPMYADMIN_PORT=8080
 MAILCATCHER_WEB_PORT=1080
 MAILCATCHER_SMTP_PORT=1025
+REDIS_PORT=6379
+REDIS_COMMANDER_PORT=8082
+
+# Note: WordPress instances get dynamically assigned ports
+# Use 'wp-dind instance info <name>' to find the assigned port
+
+# If you get port conflicts, change the ports above. For example:
+# REDIS_PORT=6380
+# PHPMYADMIN_PORT=8081
 `;
         fs.writeFileSync(path.join(targetDir, '.env'), envContent);
 
@@ -331,9 +303,10 @@ This directory contains a WordPress Docker-in-Docker (DinD) environment.
    \`\`\`
 
 3. Access your WordPress site:
-   - WordPress: http://localhost:8000
+   - WordPress: Check port with \`docker port <container-name> 80\`
    - phpMyAdmin: http://localhost:8080
    - MailCatcher: http://localhost:1080
+   - Redis Commander: http://localhost:8082 (admin/admin)
 
 ### Option 2: Create Isolated WordPress Instances
 
@@ -347,8 +320,11 @@ This directory contains a WordPress Docker-in-Docker (DinD) environment.
    wp-dind instance create mysite 80 83 nginx
    \`\`\`
 
-3. Access your WordPress instance:
-   - WordPress: http://localhost:8001 (or next available port)
+3. Get the instance port and access it:
+   \`\`\`bash
+   wp-dind instance info mysite
+   # Access WordPress at the displayed port (dynamically assigned)
+   \`\`\`
 
 ## Available Commands
 
@@ -410,9 +386,18 @@ wp-dind exec dind wp user list
 wp-dind exec -i dind bash
 \`\`\`
 
-## Services
+## Services (Running Inside DinD Container)
 
-${answers.includePhpMyAdmin ? '- **phpMyAdmin**: http://localhost:8080\n' : ''}${answers.includeMailCatcher ? '- **MailCatcher**: http://localhost:1080\n' : ''}
+All services run inside the DinD container and are accessible from the host:
+
+- **phpMyAdmin**: http://localhost:8080 - Database management interface
+- **MailCatcher**: http://localhost:1080 - Email testing (SMTP: localhost:1025)
+- **Redis**: localhost:6379 - Cache server
+- **Redis Commander**: http://localhost:8082 - Redis management (admin/admin)
+- **Docker Daemon**: localhost:2375 - Docker API (inside DinD)
+
+**Note**: WordPress instances get dynamically assigned ports. Use \`wp-dind instance info <name>\` to find the port.
+
 ## Directory Structure
 
 - \`data/wordpress/\` - Main WordPress installation
@@ -451,10 +436,7 @@ This workspace is configured with:
         const config = loadConfig();
         config.instances[targetDir] = {
             created: new Date().toISOString(),
-            services: {
-                phpmyadmin: answers.includePhpMyAdmin,
-                mailcatcher: answers.includeMailCatcher
-            }
+            workspaceName: answers.workspaceName
         };
         saveConfig(config);
     });
