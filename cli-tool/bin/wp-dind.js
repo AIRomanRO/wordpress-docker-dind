@@ -86,6 +86,18 @@ function saveWorkspaceConfig(targetDir, config) {
 function generateDockerCompose(targetDir, config = {}) {
     const containerName = config.workspaceName ? `wp-dind-${config.workspaceName}` : `wp-dind-${path.basename(targetDir)}`;
 
+    // Add workspace mode port if needed
+    let workspacePort = '';
+    if (config.workspaceType === 'workspace') {
+        workspacePort = '      - "${WORDPRESS_PORT:-8000}:80"\n';
+    }
+
+    // Add instance ports range for multi-instance mode
+    let instancePorts = '';
+    if (config.workspaceType === 'multi-instance') {
+        instancePorts = '      - "8001-8020:8001-8020"\n';
+    }
+
     // Generate YAML manually to properly handle environment variable substitution
     const composeYaml = `version: '3.8'
 
@@ -97,21 +109,48 @@ services:
     environment:
       ENABLE_NETWORK_ISOLATION: 'true'
       DOCKER_TLS_CERTDIR: ''
-    ports:
-      - "\${DOCKER_DAEMON_PORT:-2375}:2375"
-      - "\${PHPMYADMIN_PORT:-8080}:8080"
-      - "\${MAILCATCHER_WEB_PORT:-1080}:1080"
-      - "\${MAILCATCHER_SMTP_PORT:-1025}:1025"
-      - "\${REDIS_PORT:-6379}:6379"
-      - "\${REDIS_COMMANDER_PORT:-8082}:8081"
+      PUID: "\${PUID:-1000}"
+      PGID: "\${PGID:-1000}"
+      WORKSPACE_TYPE: '${config.workspaceType || 'multi-instance'}'
+    # Ports are not exposed to localhost to avoid conflicts with multiple DinD instances
+    # Access services via DinD IP address instead
+    expose:
+      - "2375"
+      - "8080"
+      - "1080"
+      - "1025"
+      - "6379"
+      - "8081"
+      - "8000"
+      - "8001"
+      - "8002"
+      - "8003"
+      - "8004"
+      - "8005"
+      - "8006"
+      - "8007"
+      - "8008"
+      - "8009"
+      - "8010"
+      - "8011"
+      - "8012"
+      - "8013"
+      - "8014"
+      - "8015"
+      - "8016"
+      - "8017"
+      - "8018"
+      - "8019"
+      - "8020"
     volumes:
       - ./data/wordpress:/var/www/html
       - ./wordpress-instances:/wordpress-instances
       - ./shared-images:/shared-images
+      - ./wp-dind-workspace.json:/wordpress-instances/.workspace-config.json:ro
       - dind-docker-data:/var/lib/docker
     networks:
       - wp-dind
-    restart: unless-stopped
+    restart: "no"
     healthcheck:
       test: ["CMD", "docker", "info"]
       interval: 30s
@@ -195,10 +234,55 @@ program
                     }
                     return true;
                 }
+            },
+            {
+                type: 'list',
+                name: 'workspaceType',
+                message: 'Workspace type:',
+                choices: [
+                    {
+                        name: 'workspace - Single WordPress site with selected stack',
+                        value: 'workspace'
+                    },
+                    {
+                        name: 'multi-instance - Multiple WordPress sites for testing different stacks',
+                        value: 'multi-instance'
+                    }
+                ],
+                default: 'workspace'
             }
         ]);
 
-        // Note: phpMyAdmin, MailCatcher, Redis, and Redis Commander are always included
+        // If workspace mode, ask for stack configuration
+        let workspaceStack = null;
+        if (answers.workspaceType === 'workspace') {
+            const stackAnswers = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'webserver',
+                    message: 'Web server:',
+                    choices: ['nginx', 'apache'],
+                    default: 'nginx'
+                },
+                {
+                    type: 'list',
+                    name: 'phpVersion',
+                    message: 'PHP version:',
+                    choices: ['8.3', '8.2', '8.1', '8.0', '7.4'],
+                    default: '8.3'
+                },
+                {
+                    type: 'list',
+                    name: 'mysqlVersion',
+                    message: 'MySQL version:',
+                    choices: ['8.0', '5.7', '5.6'],
+                    default: '8.0'
+                }
+            ]);
+            workspaceStack = stackAnswers;
+        }
+
+        // Note: phpMyAdmin, MailHog, Redis, and Redis Commander are always included
         // They run inside the DinD container via supervisord
 
         const spinner = ora('Generating configuration files...').start();
@@ -206,7 +290,10 @@ program
         // Create workspace configuration
         const workspaceConfig = {
             workspaceName: answers.workspaceName,
+            workspaceType: answers.workspaceType,
             initializedAt: new Date().toISOString(),
+            workspaceStack: workspaceStack,  // Only set for workspace mode
+            instances: {},  // For multi-instance mode
             stack: {
                 dindImage: 'airoman/wp-dind:dind-27.0.3',
                 phpVersions: ['7.4', '8.0', '8.1', '8.2', '8.3'],
@@ -214,7 +301,7 @@ program
                 webservers: ['nginx', 'apache'],
                 services: {
                     phpmyadmin: true,
-                    mailcatcher: true,
+                    mailhog: true,
                     redis: true,
                     redisCommander: true
                 }
@@ -234,7 +321,7 @@ program
                 redis: '7.4.1',
                 redisCommander: '0.8.1',
                 phpmyadmin: '5.2.3',
-                mailcatcher: '0.10.0'
+                mailhog: '1.0.1'
             }
         };
 
@@ -277,6 +364,12 @@ REDIS_COMMANDER_PORT=8082
 # If you get port conflicts, change the ports above. For example:
 # REDIS_PORT=6380
 # PHPMYADMIN_PORT=8081
+
+# User/Group IDs for file permissions
+# Set these to your host user's UID/GID to allow editing WordPress files
+# Run 'id -u' and 'id -g' on your host to get these values
+PUID=1000
+PGID=1000
 `;
         fs.writeFileSync(path.join(targetDir, '.env'), envContent);
 
@@ -422,15 +515,27 @@ This workspace is configured with:
         console.log(chalk.green('\n✅ WordPress DinD environment initialized!\n'));
         console.log(chalk.blue.bold('Workspace Information:'));
         console.log(chalk.gray(`  Name: ${workspaceConfig.workspaceName}`));
+        console.log(chalk.gray(`  Type: ${workspaceConfig.workspaceType}`));
+        if (workspaceConfig.workspaceStack) {
+            console.log(chalk.gray(`  Stack: ${workspaceConfig.workspaceStack.webserver}, PHP ${workspaceConfig.workspaceStack.phpVersion}, MySQL ${workspaceConfig.workspaceStack.mysqlVersion}`));
+        }
         console.log(chalk.gray(`  Initialized: ${workspaceConfig.initializedAt}`));
         console.log(chalk.gray(`  Config: wp-dind-workspace.json\n`));
         console.log(chalk.yellow('Next steps:'));
         console.log(chalk.gray('  1. cd ' + targetDir));
         console.log(chalk.gray('  2. wp-dind start'));
-        console.log(chalk.gray('  3. wp-dind install-wordpress (install WordPress in data/wordpress)'));
-        console.log(chalk.gray('  OR'));
-        console.log(chalk.gray('  3. wp-dind instance create mysite 80 83 nginx (create isolated instance)'));
-        console.log(chalk.gray('  4. wp-dind ps (to see all containers)\n'));
+
+        if (workspaceConfig.workspaceType === 'workspace') {
+            console.log(chalk.gray('  3. wp-dind install-wordpress'));
+            console.log(chalk.gray('  4. Access WordPress at http://<dind-ip>:8000'));
+            console.log(chalk.gray('\n  Note: Get DinD IP with "wp-dind status" after starting\n'));
+        } else {
+            console.log(chalk.gray('  3. Create instances:'));
+            console.log(chalk.gray('     docker exec wp-dind-<name> /app/instance-manager.sh create mysite 80 83 nginx'));
+            console.log(chalk.gray('  4. List instances: docker exec wp-dind-<name> /app/instance-manager.sh list'));
+            console.log(chalk.gray('  5. Access instances at http://<dind-ip>:8001, 8002, etc.'));
+            console.log(chalk.gray('\n  Note: Get DinD IP with "wp-dind status" after starting\n'));
+        }
 
         // Save to config
         const config = loadConfig();
@@ -454,10 +559,72 @@ program
             process.exit(1);
         }
 
+        // Load workspace config to get container name
+        const workspaceConfig = loadWorkspaceConfig(targetDir);
+        const containerName = workspaceConfig ? `wp-dind-${workspaceConfig.workspaceName}` : 'wp-dind';
+
         console.log(chalk.blue('Starting WordPress DinD environment...\n'));
         execCommand('docker-compose up -d', { cwd: targetDir });
         console.log(chalk.green('\n✅ Environment started successfully!\n'));
-        console.log(chalk.yellow('Run "wp-dind status" to check the status.'));
+
+        // Get DinD container IP address
+        try {
+            const ipCmd = `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${containerName}`;
+            const ipResult = require('child_process').execSync(ipCmd, { encoding: 'utf8' }).trim();
+
+            // Load .env file to get port mappings
+            const envPath = path.join(targetDir, '.env');
+            const envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+            const envVars = {};
+            envContent.split('\n').forEach(line => {
+                const match = line.match(/^([A-Z_]+)=(.+)$/);
+                if (match) {
+                    envVars[match[1]] = match[2];
+                }
+            });
+
+            const dockerPort = envVars.DOCKER_DAEMON_PORT || '2375';
+            const phpMyAdminPort = envVars.PHPMYADMIN_PORT || '8080';
+            const mailcatcherWebPort = envVars.MAILCATCHER_WEB_PORT || '1080';
+            const mailcatcherSmtpPort = envVars.MAILCATCHER_SMTP_PORT || '1025';
+            const redisPort = envVars.REDIS_PORT || '6379';
+            const redisCommanderPort = envVars.REDIS_COMMANDER_PORT || '8082';
+
+            console.log(chalk.blue.bold('📡 DinD Container Information:\n'));
+            console.log(chalk.gray(`  Container Name: ${containerName}`));
+            console.log(chalk.gray(`  IP Address: ${ipResult}\n`));
+
+            // Load workspace config to determine type
+            const configPath = path.join(targetDir, 'wp-dind-workspace.json');
+            let workspaceType = 'multi-instance';
+            if (fs.existsSync(configPath)) {
+                const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                workspaceType = config.workspaceType || 'multi-instance';
+            }
+
+            console.log(chalk.blue.bold('🌐 Accessible Services (via DinD IP only):\n'));
+            console.log(chalk.gray(`    • phpMyAdmin:        http://${ipResult}:8080`));
+            console.log(chalk.gray(`    • MailCatcher Web:   http://${ipResult}:1080`));
+            console.log(chalk.gray(`    • Redis Commander:   http://${ipResult}:8081`));
+            console.log(chalk.gray(`    • Redis:             ${ipResult}:6379`));
+            console.log(chalk.gray(`    • Docker Daemon:     ${ipResult}:2375`));
+            console.log(chalk.gray(`    • MailCatcher SMTP:  ${ipResult}:1025\n`));
+
+            if (workspaceType === 'workspace') {
+                console.log(chalk.gray(`    • WordPress:         http://${ipResult}:8000\n`));
+                console.log(chalk.yellow('Next steps:'));
+                console.log(chalk.gray('  • wp-dind install-wordpress (install WordPress)'));
+                console.log(chalk.gray('  • wp-dind status (check environment status)'));
+            } else {
+                console.log(chalk.yellow('Next steps:'));
+                console.log(chalk.gray('  • Create instance: docker exec wp-dind-' + path.basename(targetDir) + ' /app/instance-manager.sh create mysite 80 83 nginx'));
+                console.log(chalk.gray('  • List instances: docker exec wp-dind-' + path.basename(targetDir) + ' /app/instance-manager.sh list'));
+                console.log(chalk.gray('  • Access instances at http://' + ipResult + ':8001, 8002, etc.'));
+                console.log(chalk.gray('  • wp-dind status (check environment status)'));
+            }
+        } catch (error) {
+            console.log(chalk.yellow('Run "wp-dind status" to check the status.'));
+        }
     });
 
 program
@@ -543,7 +710,7 @@ program
             process.exit(1);
         }
 
-        const cmd = `docker-compose exec -T wordpress-dind instance-manager.sh ${action} ${args.join(' ')}`;
+        const cmd = `docker-compose exec -T wordpress-dind /app/instance-manager.sh ${action} ${args.join(' ')}`;
         execCommand(cmd, { cwd: targetDir });
     });
 
@@ -591,6 +758,13 @@ program
             process.exit(1);
         }
 
+        // Check if workspace mode
+        if (workspaceConfig.workspaceType !== 'workspace') {
+            console.error(chalk.red('This command only works in workspace mode.'));
+            console.log(chalk.yellow('For multi-instance mode, use: wp-dind instance create <name>'));
+            process.exit(1);
+        }
+
         // Check if WordPress is already installed
         const wpPath = path.join(targetDir, 'data/wordpress');
         const wpConfigPath = path.join(wpPath, 'wp-config.php');
@@ -611,13 +785,14 @@ program
 
         console.log(chalk.blue.bold('\n📦 Installing WordPress\n'));
         console.log(chalk.gray(`Workspace: ${workspaceConfig.workspaceName}`));
+        console.log(chalk.gray(`Stack: ${workspaceConfig.workspaceStack.webserver}, PHP ${workspaceConfig.workspaceStack.phpVersion}, MySQL ${workspaceConfig.workspaceStack.mysqlVersion}`));
         console.log(chalk.gray(`Target: data/wordpress\n`));
 
         const spinner = ora('Downloading WordPress...').start();
 
         try {
-            // Download WordPress
-            const downloadCmd = `docker-compose exec -T wordpress-dind sh -c "cd /var/www/html && wp core download --allow-root --force"`;
+            // Download WordPress using workspace-php container
+            const downloadCmd = `docker-compose exec -T wordpress-dind docker exec workspace-php php -d memory_limit=512M /usr/local/bin/wp core download --path=/var/www/html --allow-root --force`;
             execCommand(downloadCmd, { cwd: targetDir, silent: true });
 
             spinner.succeed('WordPress downloaded successfully');
@@ -698,15 +873,15 @@ program
                 installConfig = { ...installConfig, ...answers };
             }
 
-            // Create wp-config.php
+            // Create wp-config.php using workspace-php container
             spinner.start('Creating wp-config.php...');
-            const configCmd = `docker-compose exec -T wordpress-dind sh -c "cd /var/www/html && wp config create --dbname=wordpress --dbuser=root --dbpass=rootpassword --dbhost=localhost --allow-root --force"`;
+            const configCmd = `docker-compose exec -T wordpress-dind docker exec workspace-php wp config create --path=/var/www/html --dbname=wordpress --dbuser=wordpress --dbpass=wordpress --dbhost=workspace-mysql --allow-root --force`;
             execCommand(configCmd, { cwd: targetDir, silent: true });
             spinner.succeed('wp-config.php created');
 
-            // Install WordPress
+            // Install WordPress using workspace-php container
             spinner.start('Installing WordPress...');
-            const installCmd = `docker-compose exec -T wordpress-dind sh -c "cd /var/www/html && wp core install --url='${installConfig.url}' --title='${installConfig.title}' --admin_user='${installConfig.adminUser}' --admin_password='${installConfig.adminPassword}' --admin_email='${installConfig.adminEmail}' --allow-root"`;
+            const installCmd = `docker-compose exec -T wordpress-dind docker exec workspace-php wp core install --path=/var/www/html --url='${installConfig.url}' --title='${installConfig.title}' --admin_user='${installConfig.adminUser}' --admin_password='${installConfig.adminPassword}' --admin_email='${installConfig.adminEmail}' --allow-root`;
             execCommand(installCmd, { cwd: targetDir, silent: true });
             spinner.succeed('WordPress installed successfully');
 
@@ -738,7 +913,7 @@ program
         const answers = await inquirer.prompt([{
             type: 'confirm',
             name: 'confirm',
-            message: chalk.red('This will remove all containers, volumes, and data. Are you sure?'),
+            message: chalk.red('This will remove all containers, volumes, data directory, and workspace files. Are you sure?'),
             default: false
         }]);
 
@@ -748,8 +923,55 @@ program
         }
 
         console.log(chalk.blue('Destroying WordPress DinD environment...\n'));
-        execCommand('docker-compose down -v', { cwd: targetDir });
-        console.log(chalk.green('\n✅ Environment destroyed successfully!'));
+
+        // Stop and remove containers and volumes (if docker-compose.yml exists)
+        const composeFile = path.join(targetDir, 'docker-compose.yml');
+        if (fs.existsSync(composeFile)) {
+            console.log(chalk.blue('Stopping and removing containers...'));
+            try {
+                execCommand('docker-compose down -v', { cwd: targetDir });
+            } catch (error) {
+                console.log(chalk.yellow('⚠️  Could not stop containers (they may not be running)'));
+            }
+        } else {
+            console.log(chalk.yellow('⚠️  No docker-compose.yml found, skipping container removal'));
+        }
+
+        // Remove all files and directories in the workspace folder (use sudo to handle permission issues)
+        console.log(chalk.blue('Removing all workspace files and directories...'));
+        try {
+            // Remove everything in the directory except . and ..
+            execCommand(`sudo rm -rf "${targetDir}"/{*,.*} 2>/dev/null || true`, { cwd: targetDir });
+
+            // Alternative: remove specific known files/directories
+            const itemsToRemove = [
+                'data',
+                'logs',
+                'shared-images',
+                'wordpress-instances',
+                'wp-dind-workspace.json',
+                'docker-compose.yml',
+                '.env',
+                'README.md'
+            ];
+
+            for (const item of itemsToRemove) {
+                const itemPath = path.join(targetDir, item);
+                if (fs.existsSync(itemPath)) {
+                    try {
+                        execCommand(`sudo rm -rf "${itemPath}"`, { cwd: targetDir });
+                    } catch (e) {
+                        // Continue even if one item fails
+                    }
+                }
+            }
+
+            console.log(chalk.green('\n✅ Environment destroyed successfully!'));
+            console.log(chalk.gray('All containers, volumes, data, and configuration files have been removed.'));
+        } catch (error) {
+            console.log(chalk.yellow('\n⚠️  Some files could not be removed automatically.'));
+            console.log(chalk.yellow(`Please run manually: sudo rm -rf "${targetDir}"/*`));
+        }
     });
 
 program.parse(process.argv);
