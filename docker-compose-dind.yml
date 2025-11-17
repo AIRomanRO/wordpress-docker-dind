@@ -22,6 +22,9 @@ services:
       - WORDPRESS_ADMIN_PASSWORD=${WORDPRESS_ADMIN_PASSWORD:-change-this-password}
       - WORDPRESS_ADMIN_EMAIL=${WORDPRESS_ADMIN_EMAIL:-admin@example.com}
       - WORDPRESS_LOCALE=${WORDPRESS_LOCALE:-en_US}
+      # User/Group IDs for file permissions (allows host user to edit files)
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
     ports:
       - "${DOCKER_DAEMON_PORT:-2375}:2375"                                                    # Docker daemon
       - "${WP_INSTANCE_PORT_RANGE_START:-8000}-${WP_INSTANCE_PORT_RANGE_END:-8099}:8000-8099" # WordPress instances
