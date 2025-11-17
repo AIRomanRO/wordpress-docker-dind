@@ -116,6 +116,7 @@ services:
     # Access services via DinD IP address instead
     expose:
       - "2375"
+      - "3306"
       - "8080"
       - "1080"
       - "1025"
@@ -193,7 +194,7 @@ program
         }
 
         const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
-        
+
         console.log(chalk.blue.bold('\n🚀 WordPress Docker-in-Docker Initializer\n'));
         console.log(chalk.gray(`Target directory: ${targetDir}\n`));
 
@@ -425,6 +426,7 @@ This directory contains a WordPress Docker-in-Docker (DinD) environment.
 - \`wp-dind start\` - Start the DinD environment
 - \`wp-dind stop\` - Stop the DinD environment
 - \`wp-dind status\` - Check environment status
+- \`wp-dind ports\` - List all accessible services and ports
 - \`wp-dind ps\` - List all containers
 - \`wp-dind logs [-f] [-s service]\` - View logs
 - \`wp-dind destroy\` - Destroy environment (removes all data)
@@ -649,6 +651,95 @@ program
     });
 
 program
+    .command('ports')
+    .description('List all accessible services and ports')
+    .option('-d, --dir <directory>', 'Target directory (default: current directory)')
+    .action((options) => {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+
+        // Load workspace config
+        const workspaceConfig = loadWorkspaceConfig(targetDir);
+        if (!workspaceConfig) {
+            console.error(chalk.red('This directory is not initialized as a wp-dind workspace.'));
+            console.log(chalk.yellow('Run "wp-dind init" first.'));
+            process.exit(1);
+        }
+
+        const containerName = `wp-dind-${workspaceConfig.workspaceName}`;
+
+        // Get DinD container IP
+        let dindIP = 'N/A';
+        try {
+            const ipCmd = `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${containerName}`;
+            dindIP = require('child_process').execSync(ipCmd, { encoding: 'utf8' }).trim();
+        } catch (error) {
+            console.error(chalk.red('DinD container is not running. Run "wp-dind start" first.'));
+            process.exit(1);
+        }
+
+        console.log(chalk.blue.bold('\n🌐 WordPress DinD Services\n'));
+        console.log(chalk.gray(`Workspace: ${workspaceConfig.workspaceName}`));
+        console.log(chalk.gray(`Type: ${workspaceConfig.workspaceType}`));
+        console.log(chalk.gray(`DinD IP: ${dindIP}\n`));
+
+        console.log(chalk.yellow('Core Services:'));
+        console.log(chalk.gray(`  • Docker Daemon:     ${dindIP}:2375`));
+        console.log(chalk.gray(`  • MySQL:             ${dindIP}:3306`));
+        console.log(chalk.gray(`  • phpMyAdmin:        http://${dindIP}:8080`));
+        console.log(chalk.gray(`  • MailCatcher Web:   http://${dindIP}:1080`));
+        console.log(chalk.gray(`  • MailCatcher SMTP:  ${dindIP}:1025`));
+        console.log(chalk.gray(`  • Redis:             ${dindIP}:6379`));
+        console.log(chalk.gray(`  • Redis Commander:   http://${dindIP}:8081\n`));
+
+        if (workspaceConfig.workspaceType === 'workspace') {
+            console.log(chalk.yellow('WordPress:'));
+            console.log(chalk.gray(`  • WordPress Site:    http://${dindIP}:8000\n`));
+        } else {
+            console.log(chalk.yellow('WordPress Instances:'));
+
+            // Get list of instances from DinD
+            try {
+                const listCmd = `docker exec ${containerName} /app/instance-manager.sh list`;
+                const output = require('child_process').execSync(listCmd, { encoding: 'utf8' });
+
+                // Parse instance list
+                const lines = output.split('\n');
+                let foundInstances = false;
+
+                for (const line of lines) {
+                    // Look for lines with instance info (format: name | port | status)
+                    if (line.includes('|') && !line.includes('Name') && line.trim()) {
+                        const parts = line.split('|').map(p => p.trim());
+                        if (parts.length >= 2) {
+                            const name = parts[0];
+                            const port = parts[1];
+                            console.log(chalk.gray(`  • ${name.padEnd(20)} http://${dindIP}:${port}`));
+                            foundInstances = true;
+                        }
+                    }
+                }
+
+                if (!foundInstances) {
+                    console.log(chalk.gray('  No instances created yet.'));
+                    console.log(chalk.gray(`  Create one with: docker exec ${containerName} /app/instance-manager.sh create <name> 80 83 nginx\n`));
+                } else {
+                    console.log('');
+                }
+            } catch (error) {
+                console.log(chalk.gray('  Unable to list instances. Make sure the environment is running.\n'));
+            }
+        }
+
+        console.log(chalk.yellow('MySQL Connection:'));
+        console.log(chalk.gray(`  Host: ${dindIP}`));
+        console.log(chalk.gray(`  Port: 3306`));
+        console.log(chalk.gray(`  Database: wordpress`));
+        console.log(chalk.gray(`  Username: wordpress`));
+        console.log(chalk.gray(`  Password: wordpress\n`));
+    });
+
+
+program
     .command('logs')
     .description('View logs from the WordPress DinD environment')
     .option('-d, --dir <directory>', 'Target directory (default: current directory)')
@@ -659,7 +750,7 @@ program
         let cmd = 'docker-compose logs';
         if (options.follow) cmd += ' -f';
         if (options.service) cmd += ` ${options.service}`;
-        
+
         execCommand(cmd, { cwd: targetDir });
     });
 
@@ -788,11 +879,24 @@ program
         console.log(chalk.gray(`Stack: ${workspaceConfig.workspaceStack.webserver}, PHP ${workspaceConfig.workspaceStack.phpVersion}, MySQL ${workspaceConfig.workspaceStack.mysqlVersion}`));
         console.log(chalk.gray(`Target: data/wordpress\n`));
 
-        const spinner = ora('Downloading WordPress...').start();
+        const spinner = ora('Preparing environment...').start();
+
+        // Get container name
+        const containerName = `wp-dind-${workspaceConfig.workspaceName}`;
 
         try {
-            // Download WordPress using workspace-php container
-            const downloadCmd = `docker-compose exec -T wordpress-dind docker exec workspace-php php -d memory_limit=512M /usr/local/bin/wp core download --path=/var/www/html --allow-root --force`;
+            // Copy WP-CLI to workspace-php container (only needs to be done once)
+            spinner.text = 'Installing WP-CLI in workspace container...';
+            try {
+                execCommand(`docker exec ${containerName} docker cp /usr/local/bin/wp workspace-php:/usr/local/bin/wp`, { cwd: targetDir, silent: true });
+                execCommand(`docker exec ${containerName} docker exec workspace-php chmod +x /usr/local/bin/wp`, { cwd: targetDir, silent: true });
+            } catch (error) {
+                // WP-CLI might already be there, continue
+            }
+
+            // Download WordPress using WP-CLI from workspace-php container
+            spinner.text = 'Downloading WordPress...';
+            const downloadCmd = `docker exec ${containerName} docker exec workspace-php php -d memory_limit=512M /usr/local/bin/wp core download --path=/var/www/html --allow-root --force`;
             execCommand(downloadCmd, { cwd: targetDir, silent: true });
 
             spinner.succeed('WordPress downloaded successfully');
@@ -803,6 +907,15 @@ program
                 console.log(chalk.gray('  1. Configure your database settings'));
                 console.log(chalk.gray('  2. Run the WordPress installation manually\n'));
                 return;
+            }
+
+            // Get DinD IP for default URL
+            let dindIP = '172.19.0.2'; // fallback
+            try {
+                const ipCmd = `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${containerName}`;
+                dindIP = require('child_process').execSync(ipCmd, { encoding: 'utf8' }).trim();
+            } catch (error) {
+                // Use fallback IP
             }
 
             // Interactive configuration if not provided
@@ -821,7 +934,7 @@ program
                     type: 'input',
                     name: 'url',
                     message: 'WordPress site URL:',
-                    default: 'http://localhost:8000',
+                    default: `http://${dindIP}:8000`,
                     validate: (input) => input.trim() !== '' || 'URL is required'
                 });
             }
@@ -873,15 +986,15 @@ program
                 installConfig = { ...installConfig, ...answers };
             }
 
-            // Create wp-config.php using workspace-php container
+            // Create wp-config.php using WP-CLI from workspace-php container
             spinner.start('Creating wp-config.php...');
-            const configCmd = `docker-compose exec -T wordpress-dind docker exec workspace-php wp config create --path=/var/www/html --dbname=wordpress --dbuser=wordpress --dbpass=wordpress --dbhost=workspace-mysql --allow-root --force`;
+            const configCmd = `docker exec ${containerName} docker exec workspace-php php -d memory_limit=512M /usr/local/bin/wp config create --path=/var/www/html --dbname=wordpress --dbuser=wordpress --dbpass=wordpress --dbhost=workspace-mysql --allow-root --force`;
             execCommand(configCmd, { cwd: targetDir, silent: true });
             spinner.succeed('wp-config.php created');
 
-            // Install WordPress using workspace-php container
+            // Install WordPress using WP-CLI from workspace-php container
             spinner.start('Installing WordPress...');
-            const installCmd = `docker-compose exec -T wordpress-dind docker exec workspace-php wp core install --path=/var/www/html --url='${installConfig.url}' --title='${installConfig.title}' --admin_user='${installConfig.adminUser}' --admin_password='${installConfig.adminPassword}' --admin_email='${installConfig.adminEmail}' --allow-root`;
+            const installCmd = `docker exec ${containerName} docker exec workspace-php php -d memory_limit=512M /usr/local/bin/wp core install --path=/var/www/html --url='${installConfig.url}' --title='${installConfig.title}' --admin_user='${installConfig.adminUser}' --admin_password='${installConfig.adminPassword}' --admin_email='${installConfig.adminEmail}' --allow-root`;
             execCommand(installCmd, { cwd: targetDir, silent: true });
             spinner.succeed('WordPress installed successfully');
 
