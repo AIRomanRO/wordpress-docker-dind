@@ -199,6 +199,8 @@ services:
   workspace-mysql:
     image: airoman/wp-dind:mysql-${mysql_image_version}
     container_name: workspace-mysql
+    ports:
+      - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: wordpress
