@@ -44,6 +44,49 @@ COMPOSE_PROJECT_NAME=wordpress
 
 ---
 
+### File Permissions (PUID/PGID)
+
+```bash
+# User and Group IDs for file permissions
+# Set these to your host user's UID/GID to allow editing WordPress files
+PUID=1000
+PGID=1000
+```
+
+**Purpose:** Controls file ownership for WordPress files to allow host user editing.
+
+**How to find your UID/GID:**
+```bash
+# On your host machine
+id -u  # Returns your user ID (PUID)
+id -g  # Returns your group ID (PGID)
+```
+
+**Default Values:**
+- `PUID=1000` (typical first user on Linux)
+- `PGID=1000` (typical first user group on Linux)
+
+**Important Notes:**
+- WordPress files in `data/wordpress` will be owned by this UID:GID
+- This allows you to edit files directly on the host without permission issues
+- If not set, files will be owned by `82:82` (www-data in Alpine) and you'll need sudo to edit them
+- Both the DinD container and WordPress containers inside DinD respect these values
+
+**Example:**
+```bash
+# If your user ID is 1001 and group ID is 1001
+PUID=1001
+PGID=1001
+```
+
+After changing PUID/PGID, restart the environment:
+```bash
+docker-compose -f docker-compose-dind.yml down
+docker-compose -f docker-compose-dind.yml up -d
+```
+
+---
+
 ### DinD Container Settings
 
 ```bash

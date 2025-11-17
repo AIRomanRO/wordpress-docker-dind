@@ -322,7 +322,78 @@ define('SMTP_HOST', 'mailcatcher');
 define('SMTP_PORT', 1025);
 ```
 
-### 7. CLI Tool Not Found
+### 7. File Permission Issues
+
+#### Symptoms
+- Cannot edit WordPress files on host
+- "Permission denied" when trying to modify files in `data/wordpress`
+- Files owned by `82:82` or `www-data`
+- Need to use `sudo` to edit files
+
+#### Diagnosis
+
+```bash
+# Check file ownership
+ls -la data/wordpress/
+
+# Check your user ID
+id -u
+id -g
+```
+
+#### Solutions
+
+**Solution 1: Set PUID/PGID (Recommended)**
+
+This is the proper way to fix permissions permanently.
+
+1. Find your user and group IDs:
+```bash
+id -u  # Your user ID (e.g., 1000)
+id -g  # Your group ID (e.g., 1000)
+```
+
+2. Edit `.env` file:
+```bash
+PUID=1000  # Replace with your user ID
+PGID=1000  # Replace with your group ID
+```
+
+3. Restart the environment:
+```bash
+docker-compose -f docker-compose-dind.yml down
+docker-compose -f docker-compose-dind.yml up -d
+```
+
+4. Fix existing file ownership:
+```bash
+# Inside DinD container
+docker exec wordpress-dind-host chown -R 1000:1000 /wordpress-instances/mysite/data/wordpress
+```
+
+**Solution 2: Temporary Fix (Not Recommended)**
+
+```bash
+# Change ownership to your user (temporary, will be reset on container restart)
+sudo chown -R $(id -u):$(id -g) data/wordpress/
+```
+
+**Solution 3: Add Your User to www-data Group**
+
+```bash
+# Add your user to group 82 (www-data)
+sudo groupadd -g 82 www-data 2>/dev/null || true
+sudo usermod -a -G www-data $USER
+
+# Log out and log back in for changes to take effect
+```
+
+**Important Notes:**
+- PUID/PGID must be set **before** creating WordPress instances
+- If you change PUID/PGID after creating instances, you need to fix file ownership manually
+- The recommended PUID/PGID values are your host user's UID/GID (usually 1000:1000)
+
+### 8. CLI Tool Not Found
 
 #### Symptoms
 - `wp-dind: command not found`
@@ -371,7 +442,7 @@ npm install -g .
 npx wp-dind-cli init
 ```
 
-### 8. Port Conflicts
+### 9. Port Conflicts
 
 #### Symptoms
 - "Port already in use" error
@@ -419,7 +490,7 @@ services:
       - "0:80"  # Docker assigns random port
 ```
 
-### 9. Slow Performance
+### 10. Slow Performance
 
 #### Symptoms
 - WordPress site loads slowly
@@ -478,7 +549,7 @@ volumes:
       device: /path/to/fast/storage
 ```
 
-### 10. Network Connectivity Issues
+### 11. Network Connectivity Issues
 
 #### Symptoms
 - Containers cannot communicate
