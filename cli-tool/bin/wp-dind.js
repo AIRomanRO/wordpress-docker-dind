@@ -384,7 +384,7 @@ This directory contains a WordPress Docker-in-Docker (DinD) environment.
 
 ## Quick Start
 
-### Option 1: Install WordPress in Workspace (data/wordpress)
+### Workspace Mode (Single WordPress Site)
 
 1. Start the environment:
    \`\`\`bash
@@ -396,102 +396,347 @@ This directory contains a WordPress Docker-in-Docker (DinD) environment.
    wp-dind install-wordpress
    \`\`\`
 
-3. Access your WordPress site:
-   - WordPress: Check port with \`docker port <container-name> 80\`
-   - phpMyAdmin: http://localhost:8080
-   - MailCatcher: http://localhost:1080
-   - Redis Commander: http://localhost:8082 (admin/admin)
+3. Get DinD IP and access services:
+   \`\`\`bash
+   wp-dind ports
+   \`\`\`
 
-### Option 2: Create Isolated WordPress Instances
+   Access your services at:
+   - WordPress: \`http://<dind-ip>:8000\`
+   - phpMyAdmin: \`http://<dind-ip>:8080\`
+   - MailCatcher: \`http://<dind-ip>:1080\`
+   - Redis Commander: \`http://<dind-ip>:8081\`
+
+### Multi-Instance Mode (Multiple WordPress Sites)
 
 1. Start the environment:
    \`\`\`bash
    wp-dind start
    \`\`\`
 
-2. Create a WordPress instance:
+2. Create WordPress instances:
    \`\`\`bash
+   # Create instance with MySQL 8.0, PHP 8.3, nginx
    wp-dind instance create mysite 80 83 nginx
+
+   # Create another instance with different stack
+   wp-dind instance create legacy 57 74 apache
    \`\`\`
 
-3. Get the instance port and access it:
+3. List instances and get access URLs:
    \`\`\`bash
-   wp-dind instance info mysite
-   # Access WordPress at the displayed port (dynamically assigned)
+   wp-dind ports
+   # Shows all instances with their ports (8001, 8002, etc.)
    \`\`\`
 
 ## Available Commands
 
+### Initialization
+\`\`\`bash
+wp-dind init [options]
+\`\`\`
+Initialize a new WordPress DinD workspace in the current directory.
+
+**Options:**
+- \`-d, --dir <directory>\` - Target directory (default: current directory)
+- \`--with-phpmyadmin\` - Include phpMyAdmin service
+- \`--with-mailcatcher\` - Include MailCatcher service
+
+**Interactive prompts:**
+- Workspace name
+- Workspace type (workspace or multi-instance)
+- Web server (nginx or apache) - workspace mode only
+- PHP version (7.4, 8.0, 8.1, 8.2, 8.3) - workspace mode only
+- MySQL version (5.6, 5.7, 8.0) - workspace mode only
+
 ### Environment Management
-- \`wp-dind start\` - Start the DinD environment
-- \`wp-dind stop\` - Stop the DinD environment
-- \`wp-dind status\` - Check environment status
-- \`wp-dind ports\` - List all accessible services and ports
-- \`wp-dind ps\` - List all containers
-- \`wp-dind logs [-f] [-s service]\` - View logs
-- \`wp-dind destroy\` - Destroy environment (removes all data)
 
-### WordPress Installation
-- \`wp-dind install-wordpress\` - Install WordPress in data/wordpress
-- \`wp-dind install-wordpress --url <url> --title <title>\` - Install with options
-- \`wp-dind install-wordpress --skip-install\` - Download only, skip installation
+**Start the environment:**
+\`\`\`bash
+wp-dind start [-d <directory>]
+\`\`\`
+Starts the DinD container and all services.
 
-### Instance Management
-- \`wp-dind instance create <name> [mysql] [php] [webserver]\` - Create instance
-- \`wp-dind instance list\` - List all instances
-- \`wp-dind instance info <name>\` - Show instance info
-- \`wp-dind instance logs <name> [service]\` - View instance logs
-- \`wp-dind instance start/stop <name>\` - Start/stop instance
-- \`wp-dind instance remove <name>\` - Remove instance
+**Stop the environment:**
+\`\`\`bash
+wp-dind stop [-d <directory>]
+\`\`\`
+Stops the DinD container and all services.
+
+**Check status:**
+\`\`\`bash
+wp-dind status [-d <directory>]
+\`\`\`
+Shows the status of all containers.
+
+**List services and ports:**
+\`\`\`bash
+wp-dind ports [-d <directory>]
+\`\`\`
+Lists all accessible services, ports, and connection details. Shows:
+- Core services (Docker, MySQL, phpMyAdmin, MailCatcher, Redis)
+- WordPress instances with their ports
+- MySQL connection credentials
+
+**List containers:**
+\`\`\`bash
+wp-dind ps [-d <directory>] [-a]
+\`\`\`
+Lists all running containers.
+- \`-a, --all\` - Show all containers (including stopped)
+
+**View logs:**
+\`\`\`bash
+wp-dind logs [-d <directory>] [-f] [-s <service>]
+\`\`\`
+View logs from the DinD environment.
+- \`-f, --follow\` - Follow log output (live tail)
+- \`-s, --service <service>\` - Show logs for specific service
+
+**Destroy environment:**
+\`\`\`bash
+wp-dind destroy [-d <directory>]
+\`\`\`
+Completely removes the DinD environment including all containers, volumes, and data.
+**Warning:** This action cannot be undone!
+
+### WordPress Installation (Workspace Mode Only)
+
+\`\`\`bash
+wp-dind install-wordpress [options]
+\`\`\`
+Install WordPress in the workspace (data/wordpress directory).
+
+**Options:**
+- \`-d, --dir <directory>\` - Target directory (default: current directory)
+- \`--url <url>\` - WordPress site URL (default: http://<dind-ip>:8000)
+- \`--title <title>\` - Site title (default: workspace name)
+- \`--admin-user <username>\` - Admin username (default: admin)
+- \`--admin-password <password>\` - Admin password (default: prompted)
+- \`--admin-email <email>\` - Admin email (default: admin@example.com)
+- \`--skip-install\` - Download WordPress only, skip installation
+
+### Instance Management (Multi-Instance Mode)
+
+**Create instance:**
+\`\`\`bash
+wp-dind instance create <name> [mysql_version] [php_version] [webserver]
+\`\`\`
+Creates a new isolated WordPress instance.
+- \`mysql_version\`: 56, 57, 80 (default: 80)
+- \`php_version\`: 74, 80, 81, 82, 83 (default: 83)
+- \`webserver\`: nginx, apache (default: nginx)
+
+**List instances:**
+\`\`\`bash
+wp-dind instance list [-d <directory>]
+\`\`\`
+Lists all WordPress instances with their configuration and status.
+
+**Show instance info:**
+\`\`\`bash
+wp-dind instance info <name> [-d <directory>]
+\`\`\`
+Shows detailed information about a specific instance including:
+- Configuration (MySQL, PHP, web server versions)
+- Port assignment
+- Database credentials
+- File paths
+
+**Start/Stop instance:**
+\`\`\`bash
+wp-dind instance start <name> [-d <directory>]
+wp-dind instance stop <name> [-d <directory>]
+\`\`\`
+Start or stop a specific WordPress instance.
+
+**Remove instance:**
+\`\`\`bash
+wp-dind instance remove <name> [-d <directory>]
+\`\`\`
+Removes a WordPress instance and all its data.
+
+**Clone instance:**
+\`\`\`bash
+wp-dind instance clone <source> <target> [strategy]
+\`\`\`
+Clone an existing instance with different strategies:
+- \`symlink\` - Share files, separate database (default)
+- \`copy-all\` - Copy files and database
+- \`copy-files\` - Copy files, empty database
+
+**View instance logs:**
+\`\`\`bash
+wp-dind instance logs <name> [service] [-d <directory>]
+\`\`\`
+View logs for a specific instance.
+- \`service\`: php, mysql, nginx, apache (default: all)
 
 ### Execute Commands
-- \`wp-dind exec dind <command>\` - Execute command in DinD host
-- \`wp-dind exec <container> <command>\` - Execute command in specific container
 
-### Examples
+\`\`\`bash
+wp-dind exec <container> <command...> [options]
+\`\`\`
+Execute a command inside a specific container.
 
-**Install WordPress in workspace:**
+**Options:**
+- \`-d, --dir <directory>\` - Target directory (default: current directory)
+- \`-i, --interactive\` - Run in interactive mode (allocate TTY)
+- \`-u, --user <user>\` - Run as specific user (e.g., www-data, root)
+
+**Examples:**
+\`\`\`bash
+# Execute WP-CLI command
+wp-dind exec dind wp plugin list
+
+# Access container shell
+wp-dind exec -i dind bash
+
+# Run command as www-data user
+wp-dind exec -u www-data dind wp cache flush
+\`\`\`
+
+## Usage Examples
+
+### Workspace Mode (Single WordPress Site)
+
+**1. Initialize and start:**
+\`\`\`bash
+wp-dind init
+# Select "workspace" mode
+# Choose your stack (nginx/apache, PHP version, MySQL version)
+
+wp-dind start
+\`\`\`
+
+**2. Install WordPress:**
 \`\`\`bash
 wp-dind install-wordpress \\
-  --url http://localhost:8000 \\
+  --url http://172.19.0.2:8000 \\
   --title "My Site" \\
   --admin-user admin \\
   --admin-password mypassword \\
   --admin-email admin@example.com
 \`\`\`
 
-**Create WordPress instance:**
+**3. Check services and ports:**
 \`\`\`bash
-wp-dind instance create mysite 80 83 nginx
-# Arguments: name mysql_version php_version webserver
-# mysql_version: 56, 57, 80
-# php_version: 74, 80, 81, 82, 83
-# webserver: nginx, apache
+wp-dind ports
 \`\`\`
 
-**Execute WP-CLI commands:**
+**4. Execute WP-CLI commands:**
 \`\`\`bash
-wp-dind exec dind wp --info
 wp-dind exec dind wp plugin list
+wp-dind exec dind wp theme activate twentytwentyfour
 wp-dind exec dind wp user list
 \`\`\`
+
+### Multi-Instance Mode (Multiple WordPress Sites)
+
+**1. Initialize and start:**
+\`\`\`bash
+wp-dind init
+# Select "multi-instance" mode
+
+wp-dind start
+\`\`\`
+
+**2. Create instances with different stacks:**
+\`\`\`bash
+# Create instance with MySQL 8.0, PHP 8.3, nginx
+wp-dind instance create mysite 80 83 nginx
+
+# Create instance with MySQL 5.7, PHP 7.4, apache
+wp-dind instance create legacy-site 57 74 apache
+
+# Create instance with default stack
+wp-dind instance create another-site
+\`\`\`
+
+**3. List and manage instances:**
+\`\`\`bash
+# List all instances
+wp-dind instance list
+
+# Get instance details
+wp-dind instance info mysite
+
+# View instance logs
+wp-dind instance logs mysite php
+\`\`\`
+
+**4. Clone an instance:**
+\`\`\`bash
+# Clone with shared files (symlink)
+wp-dind instance clone mysite mysite-dev symlink
+
+# Clone with separate files and database
+wp-dind instance clone mysite mysite-staging copy-all
+\`\`\`
+
+### Common Tasks
 
 **Access container shell:**
 \`\`\`bash
 wp-dind exec -i dind bash
 \`\`\`
 
+**View logs:**
+\`\`\`bash
+# Follow all logs
+wp-dind logs -f
+
+# View specific service logs
+wp-dind logs -s wordpress-dind
+\`\`\`
+
+**Connect to MySQL:**
+\`\`\`bash
+# Get connection details
+wp-dind ports
+
+# Connect from host
+mysql -h <dind-ip> -P 3306 -u wordpress -pwordpress wordpress
+\`\`\`
+
+**Manage environment:**
+\`\`\`bash
+# Check status
+wp-dind status
+
+# Stop environment
+wp-dind stop
+
+# Start environment
+wp-dind start
+
+# Destroy everything (careful!)
+wp-dind destroy
+\`\`\`
+
 ## Services (Running Inside DinD Container)
 
-All services run inside the DinD container and are accessible from the host:
+All services run inside the DinD container and are accessible via the DinD IP address.
+Use \`wp-dind ports\` to get the DinD IP and see all available services.
 
-- **phpMyAdmin**: http://localhost:8080 - Database management interface
-- **MailCatcher**: http://localhost:1080 - Email testing (SMTP: localhost:1025)
-- **Redis**: localhost:6379 - Cache server
-- **Redis Commander**: http://localhost:8082 - Redis management (admin/admin)
-- **Docker Daemon**: localhost:2375 - Docker API (inside DinD)
+**Core Services:**
+- **Docker Daemon**: \`<dind-ip>:2375\` - Docker API (inside DinD)
+- **MySQL**: \`<dind-ip>:3306\` - Database server (wordpress/wordpress)
+- **phpMyAdmin**: \`http://<dind-ip>:8080\` - Database management interface
+- **MailCatcher Web**: \`http://<dind-ip>:1080\` - Email testing interface
+- **MailCatcher SMTP**: \`<dind-ip>:1025\` - SMTP server for testing emails
+- **Redis**: \`<dind-ip>:6379\` - Cache server
+- **Redis Commander**: \`http://<dind-ip>:8081\` - Redis management interface
 
-**Note**: WordPress instances get dynamically assigned ports. Use \`wp-dind instance info <name>\` to find the port.
+**WordPress Access:**
+- **Workspace Mode**: \`http://<dind-ip>:8000\`
+- **Multi-Instance Mode**: Ports 8001, 8002, 8003, etc. (use \`wp-dind ports\` to see all instances)
+
+**Important Notes:**
+- Services are NOT accessible via localhost to avoid conflicts when running multiple DinD instances
+- Each DinD instance gets its own IP address on the wp-dind network (172.19.0.0/16)
+- Use \`wp-dind ports\` to get the exact IP address and port for each service
+- DinD containers do NOT auto-start after host reboot (restart policy: "no")
 
 ## Directory Structure
 
@@ -1087,10 +1332,78 @@ program
         }
     });
 
+// Custom help command
+program
+    .command('help [command]')
+    .description('Show help for wp-dind or a specific command')
+    .action((command) => {
+        if (command) {
+            // Show help for specific command
+            program.commands.find(cmd => cmd.name() === command)?.help();
+        } else {
+            // Show general help
+            console.log(chalk.blue.bold('\n🚀 WordPress Docker-in-Docker (wp-dind) CLI\n'));
+            console.log(chalk.gray('A powerful CLI tool for managing WordPress development environments using Docker-in-Docker.\n'));
+
+            console.log(chalk.yellow('Quick Start:\n'));
+            console.log(chalk.gray('  1. Initialize:  wp-dind init'));
+            console.log(chalk.gray('  2. Start:       wp-dind start'));
+            console.log(chalk.gray('  3. Install:     wp-dind install-wordpress  (workspace mode)'));
+            console.log(chalk.gray('     OR Create:   wp-dind instance create mysite  (multi-instance mode)'));
+            console.log(chalk.gray('  4. Ports:       wp-dind ports\n'));
+
+            console.log(chalk.yellow('Common Commands:\n'));
+            console.log(chalk.gray('  Environment:'));
+            console.log(chalk.gray('    init              Initialize new workspace'));
+            console.log(chalk.gray('    start             Start the environment'));
+            console.log(chalk.gray('    stop              Stop the environment'));
+            console.log(chalk.gray('    status            Check status'));
+            console.log(chalk.gray('    ports             List all services and ports'));
+            console.log(chalk.gray('    destroy           Remove everything\n'));
+
+            console.log(chalk.gray('  WordPress (Workspace Mode):'));
+            console.log(chalk.gray('    install-wordpress Install WordPress in data/wordpress\n'));
+
+            console.log(chalk.gray('  Instances (Multi-Instance Mode):'));
+            console.log(chalk.gray('    instance create   Create new instance'));
+            console.log(chalk.gray('    instance list     List all instances'));
+            console.log(chalk.gray('    instance info     Show instance details'));
+            console.log(chalk.gray('    instance start    Start instance'));
+            console.log(chalk.gray('    instance stop     Stop instance'));
+            console.log(chalk.gray('    instance remove   Remove instance'));
+            console.log(chalk.gray('    instance clone    Clone instance\n'));
+
+            console.log(chalk.gray('  Utilities:'));
+            console.log(chalk.gray('    exec              Execute command in container'));
+            console.log(chalk.gray('    logs              View logs'));
+            console.log(chalk.gray('    ps                List containers\n'));
+
+            console.log(chalk.yellow('Get Detailed Help:\n'));
+            console.log(chalk.gray('  wp-dind <command> --help    Show help for specific command'));
+            console.log(chalk.gray('  wp-dind --help              Show all available commands\n'));
+
+            console.log(chalk.yellow('Examples:\n'));
+            console.log(chalk.gray('  # Workspace mode (single site)'));
+            console.log(chalk.gray('  wp-dind init && wp-dind start && wp-dind install-wordpress\n'));
+            console.log(chalk.gray('  # Multi-instance mode (multiple sites)'));
+            console.log(chalk.gray('  wp-dind init && wp-dind start'));
+            console.log(chalk.gray('  wp-dind instance create mysite 80 83 nginx'));
+            console.log(chalk.gray('  wp-dind instance create legacy 57 74 apache\n'));
+
+            console.log(chalk.yellow('Documentation:\n'));
+            console.log(chalk.gray('  See README.md in your workspace directory for full documentation.\n'));
+        }
+    });
+
 program.parse(process.argv);
 
-// Show help if no command provided
+// Show custom help if no command provided
 if (!process.argv.slice(2).length) {
-    program.outputHelp();
+    const helpCommand = program.commands.find(cmd => cmd.name() === 'help');
+    if (helpCommand) {
+        helpCommand._actionHandler();
+    } else {
+        program.outputHelp();
+    }
 }
 
