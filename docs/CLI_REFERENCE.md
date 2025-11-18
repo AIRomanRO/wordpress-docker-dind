@@ -195,6 +195,12 @@ wp-dind destroy
 
 Install WordPress in the workspace (data/wordpress directory). **Workspace mode only.**
 
+**Automatic Actions:**
+- Downloads WordPress core files
+- Creates wp-config.php with database credentials
+- Installs WordPress with provided settings
+- **Automatically fixes file permissions** (makes files editable from host)
+
 **Options:**
 - `-d, --dir <directory>` - Target directory (default: current directory)
 - `--url <url>` - WordPress site URL (default: http://&lt;dind-ip&gt;:8000)
@@ -208,6 +214,36 @@ Install WordPress in the workspace (data/wordpress directory). **Workspace mode 
 ```bash
 wp-dind install-wordpress
 wp-dind install-wordpress --url http://172.19.0.2:8000 --title "My Site" --admin-user admin --admin-password secret123
+```
+
+#### `wp-dind fix-permissions`
+
+Fix file permissions to make WordPress files editable from the host system AND writable by the web server. **Workspace mode only.**
+
+**Note:** This is automatically run after `wp-dind install-wordpress`, but you may need it later.
+
+**Options:**
+- `-d, --dir <directory>` - Target directory (default: current directory)
+
+**When to use:**
+- After uploading plugins/themes via WordPress admin
+- After WordPress auto-updates files
+- When you can't edit files from your IDE/editor
+- When you get "Permission denied" errors editing files
+- When WordPress can't update plugins/themes (shows "Could not create directory" error)
+
+**What it does:**
+- Changes ownership to `your-user:www-data` (your user owns, www-data group can write)
+- Automatically detects the correct www-data GID from the PHP container
+- Sets directory permissions to `775` (rwxrwxr-x)
+- Sets file permissions to `664` (rw-rw-r--)
+- Allows both you AND the web server to read/write files
+- Works correctly in both workspace and multi-instance modes
+
+**Example:**
+```bash
+wp-dind fix-permissions
+wp-dind fix-permissions -d /path/to/workspace
 ```
 
 ---
@@ -443,7 +479,7 @@ wp-dind init
 # Start environment
 wp-dind start
 
-# Install WordPress
+# Install WordPress (permissions are fixed automatically)
 wp-dind install-wordpress \
   --url http://172.19.0.2:8000 \
   --title "My Development Site" \
@@ -661,10 +697,28 @@ docker exec wp-dind-<workspace-name> docker exec workspace-mysql mysqladmin ping
 wp-dind logs -f
 ```
 
-**Permission issues:**
+**WordPress can't update plugins/themes ("Could not create directory"):**
 ```bash
-# Fix file permissions
+# Fix permissions so both you and web server can write
+wp-dind fix-permissions
+
+# This automatically:
+# - Detects the correct www-data GID from PHP container
+# - Sets ownership: your-user:www-data
+# - Sets directories: 775 (rwxrwxr-x)
+# - Sets files: 664 (rw-rw-r--)
+```
+
+**Permission issues (can't edit files from host):**
+```bash
+# Use the built-in command (recommended)
+wp-dind fix-permissions
+
+# Or manually from host
 sudo chown -R $USER:$USER data/wordpress/
+
+# Or from inside DinD container
+docker exec wp-dind-<workspace-name> chown -R $(id -u):$(id -g) /var/www/html
 ```
 
 ---

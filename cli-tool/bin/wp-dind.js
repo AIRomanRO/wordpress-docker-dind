@@ -502,10 +502,12 @@ Completely removes the DinD environment including all containers, volumes, and d
 
 ### WordPress Installation (Workspace Mode Only)
 
+**Install WordPress:**
 \`\`\`bash
 wp-dind install-wordpress [options]
 \`\`\`
 Install WordPress in the workspace (data/wordpress directory).
+**Note:** File permissions are automatically fixed after installation.
 
 **Options:**
 - \`-d, --dir <directory>\` - Target directory (default: current directory)
@@ -515,6 +517,21 @@ Install WordPress in the workspace (data/wordpress directory).
 - \`--admin-password <password>\` - Admin password (default: prompted)
 - \`--admin-email <email>\` - Admin email (default: admin@example.com)
 - \`--skip-install\` - Download WordPress only, skip installation
+
+**Fix file permissions:**
+\`\`\`bash
+wp-dind fix-permissions [-d <directory>]
+\`\`\`
+Fix file permissions to make WordPress files editable from host AND writable by web server.
+Automatically detects the correct www-data GID and sets ownership to \`your-user:www-data\`.
+Sets proper permissions (dirs: 775, files: 664).
+**Note:** This is automatically run after \`install-wordpress\`, but you may need it later.
+
+**When to use:**
+- After uploading plugins/themes via WordPress admin
+- After WordPress auto-updates files
+- When you can't edit files from your IDE
+- When WordPress can't update plugins/themes ("Could not create directory" error)
 
 ### Instance Management (Multi-Instance Mode)
 
@@ -1147,6 +1164,24 @@ program
             spinner.succeed('WordPress downloaded successfully');
 
             if (options.skipInstall) {
+                // Fix file permissions even when skipping install
+                spinner.start('Fixing file permissions...');
+                try {
+                    const userId = require('child_process').execSync('id -u', { encoding: 'utf8' }).trim();
+                    const wwwDataGid = require('child_process').execSync(
+                        `docker exec ${containerName} docker exec workspace-php id -g www-data`,
+                        { encoding: 'utf8' }
+                    ).trim();
+                    // Set ownership to user:www-data and proper permissions
+                    execCommand(`docker exec ${containerName} docker exec workspace-php chown -R ${userId}:${wwwDataGid} /var/www/html`, { cwd: targetDir, silent: true });
+                    execCommand(`docker exec ${containerName} docker exec workspace-php find /var/www/html -type d -exec chmod 775 {} \\;`, { cwd: targetDir, silent: true });
+                    execCommand(`docker exec ${containerName} docker exec workspace-php find /var/www/html -type f -exec chmod 664 {} \\;`, { cwd: targetDir, silent: true });
+                    spinner.succeed('File permissions fixed');
+                } catch (error) {
+                    spinner.warn('Could not fix file permissions automatically');
+                    console.log(chalk.yellow('  Run "wp-dind fix-permissions" to fix manually'));
+                }
+
                 console.log(chalk.green('\n✅ WordPress downloaded to data/wordpress'));
                 console.log(chalk.yellow('\nNext steps:'));
                 console.log(chalk.gray('  1. Configure your database settings'));
@@ -1243,6 +1278,24 @@ program
             execCommand(installCmd, { cwd: targetDir, silent: true });
             spinner.succeed('WordPress installed successfully');
 
+            // Fix file permissions automatically
+            spinner.start('Fixing file permissions...');
+            try {
+                const userId = require('child_process').execSync('id -u', { encoding: 'utf8' }).trim();
+                const wwwDataGid = require('child_process').execSync(
+                    `docker exec ${containerName} docker exec workspace-php id -g www-data`,
+                    { encoding: 'utf8' }
+                ).trim();
+                // Set ownership to user:www-data and proper permissions
+                execCommand(`docker exec ${containerName} docker exec workspace-php chown -R ${userId}:${wwwDataGid} /var/www/html`, { cwd: targetDir, silent: true });
+                execCommand(`docker exec ${containerName} docker exec workspace-php find /var/www/html -type d -exec chmod 775 {} \\;`, { cwd: targetDir, silent: true });
+                execCommand(`docker exec ${containerName} docker exec workspace-php find /var/www/html -type f -exec chmod 664 {} \\;`, { cwd: targetDir, silent: true });
+                spinner.succeed('File permissions fixed');
+            } catch (error) {
+                spinner.warn('Could not fix file permissions automatically');
+                console.log(chalk.yellow('  Run "wp-dind fix-permissions" to fix manually'));
+            }
+
             console.log(chalk.green('\n✅ WordPress installation complete!\n'));
             console.log(chalk.blue.bold('Access Information:'));
             console.log(chalk.gray(`  URL: ${installConfig.url}`));
@@ -1332,6 +1385,83 @@ program
         }
     });
 
+// Fix permissions command
+program
+    .command('fix-permissions')
+    .description('Fix file permissions for WordPress files (makes them editable from host and writable by web server)')
+    .option('-d, --dir <directory>', 'Target directory (default: current directory)')
+    .action((options) => {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+
+        // Load workspace config
+        const workspaceConfig = loadWorkspaceConfig(targetDir);
+        if (!workspaceConfig) {
+            console.error(chalk.red('This directory is not initialized as a wp-dind workspace.'));
+            console.log(chalk.yellow('Run "wp-dind init" first.'));
+            process.exit(1);
+        }
+
+        if (workspaceConfig.workspaceType !== 'workspace') {
+            console.error(chalk.red('This command is only available in workspace mode.'));
+            console.log(chalk.yellow('For multi-instance mode, files are managed inside the DinD container.'));
+            process.exit(1);
+        }
+
+        const containerName = `wp-dind-${workspaceConfig.workspaceName}`;
+        const wordpressPath = path.join(targetDir, 'data', 'wordpress');
+
+        // Check if WordPress directory exists
+        if (!fs.existsSync(wordpressPath)) {
+            console.error(chalk.red('WordPress directory not found.'));
+            console.log(chalk.yellow('Run "wp-dind install-wordpress" first.'));
+            process.exit(1);
+        }
+
+        console.log(chalk.blue('\n🔧 Fixing file permissions...\n'));
+
+        try {
+            // Get current user ID
+            const userId = require('child_process').execSync('id -u', { encoding: 'utf8' }).trim();
+
+            // Get www-data GID from inside the PHP container (it varies by PHP image)
+            const wwwDataGid = require('child_process').execSync(
+                `docker exec ${containerName} docker exec workspace-php id -g www-data`,
+                { encoding: 'utf8' }
+            ).trim();
+
+            console.log(chalk.gray('Setting ownership and permissions...'));
+            console.log(chalk.gray(`  Owner: ${userId}:www-data (${wwwDataGid})`));
+            console.log(chalk.gray('  Directories: 775 (rwxrwxr-x)'));
+            console.log(chalk.gray('  Files: 664 (rw-rw-r--)\n'));
+
+            // Change ownership: user owns files, www-data group can write
+            // Run from inside workspace-php to use the correct www-data GID
+            const chownCmd = `docker exec ${containerName} docker exec workspace-php chown -R ${userId}:${wwwDataGid} /var/www/html`;
+            execCommand(chownCmd, { cwd: targetDir, silent: true });
+
+            // Set directory permissions to 775 (owner and group can write)
+            const chmodDirCmd = `docker exec ${containerName} docker exec workspace-php find /var/www/html -type d -exec chmod 775 {} \\;`;
+            execCommand(chmodDirCmd, { cwd: targetDir, silent: true });
+
+            // Set file permissions to 664 (owner and group can write)
+            const chmodFileCmd = `docker exec ${containerName} docker exec workspace-php find /var/www/html -type f -exec chmod 664 {} \\;`;
+            execCommand(chmodFileCmd, { cwd: targetDir, silent: true });
+
+            console.log(chalk.green('✔ File permissions fixed successfully!\n'));
+            console.log(chalk.gray('You can now:'));
+            console.log(chalk.gray('  • Edit files from your host system'));
+            console.log(chalk.gray('  • Update plugins/themes from WordPress admin'));
+            console.log(chalk.gray('  • Upload files via WordPress media library\n'));
+        } catch (error) {
+            console.error(chalk.red('Failed to fix permissions:'), error.message);
+            console.log(chalk.yellow('\nYou can try manually:'));
+            console.log(chalk.gray(`  docker exec ${containerName} docker exec workspace-php chown -R $(id -u):www-data /var/www/html`));
+            console.log(chalk.gray(`  docker exec ${containerName} docker exec workspace-php find /var/www/html -type d -exec chmod 775 {} \\;`));
+            console.log(chalk.gray(`  docker exec ${containerName} docker exec workspace-php find /var/www/html -type f -exec chmod 664 {} \\;\n`));
+            process.exit(1);
+        }
+    });
+
 // Custom help command
 program
     .command('help [command]')
@@ -1362,7 +1492,8 @@ program
             console.log(chalk.gray('    destroy           Remove everything\n'));
 
             console.log(chalk.gray('  WordPress (Workspace Mode):'));
-            console.log(chalk.gray('    install-wordpress Install WordPress in data/wordpress\n'));
+            console.log(chalk.gray('    install-wordpress Install WordPress in data/wordpress'));
+            console.log(chalk.gray('    fix-permissions   Fix file permissions for editing\n'));
 
             console.log(chalk.gray('  Instances (Multi-Instance Mode):'));
             console.log(chalk.gray('    instance create   Create new instance'));
