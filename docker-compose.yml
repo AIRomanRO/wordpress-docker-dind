@@ -29,7 +29,7 @@ services:
       # Share Docker socket with host (optional, for image sharing)
       - /var/run/docker.sock:/var/run/docker-host.sock:ro
     networks:
-      - wordpress-dind-network
+      - wp-dind
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "docker", "info"]
@@ -55,7 +55,7 @@ services:
     volumes:
       - phpmyadmin-sessions:/sessions
     networks:
-      - wordpress-dind-network
+      - wp-dind
     restart: unless-stopped
 
   # MailCatcher for email testing
@@ -69,11 +69,12 @@ services:
       - "1080:1080"  # Web interface
       - "1025:1025"  # SMTP server
     networks:
-      - wordpress-dind-network
+      - wp-dind
     restart: unless-stopped
 
 networks:
-  wordpress-dind-network:
+  wp-dind:
+    name: wp-dind
     driver: bridge
     ipam:
       config:

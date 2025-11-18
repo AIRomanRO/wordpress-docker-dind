@@ -44,6 +44,21 @@ Complete guide to configuring the WordPress DinD environment using `.env` and co
 
 ---
 
+#### [Workspace Modes Guide](WORKSPACE_MODES.md) ⭐ **NEW**
+Complete guide to choosing and using workspace modes.
+
+**Topics:**
+- Workspace Mode vs Multi-Instance Mode
+- When to use each mode
+- Architecture differences
+- Usage examples
+- Instance cloning strategies
+- Switching between modes
+- Best practices
+- Troubleshooting
+
+---
+
 ### Usage & Reference
 
 #### [Usage Guide](USAGE.md)

@@ -15,13 +15,6 @@ RUN apk add --no-cache \
     iproute2 \
     iptables \
     bridge-utils \
-    ruby \
-    ruby-dev \
-    ruby-bundler \
-    sqlite-dev \
-    build-base \
-    libffi-dev \
-    openssl-dev \
     php83 \
     php83-fpm \
     php83-mysqli \
@@ -44,8 +37,9 @@ RUN apk add --no-cache \
     nodejs \
     npm
 
-# Install MailCatcher
-RUN gem install mailcatcher --no-document
+# Install MailHog (simpler alternative to MailCatcher, no Ruby dependencies)
+RUN curl -L https://github.com/mailhog/MailHog/releases/download/v1.0.1/MailHog_linux_amd64 -o /usr/local/bin/mailhog && \
+    chmod +x /usr/local/bin/mailhog
 
 # Install Redis Commander
 RUN npm install -g redis-commander
@@ -70,7 +64,9 @@ RUN mkdir -p /var/www/phpmyadmin && \
     curl -L https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.gz | tar xz && \
     mv phpMyAdmin-5.2.3-all-languages/* /var/www/phpmyadmin/ && \
     rm -rf phpMyAdmin-5.2.3-all-languages && \
-    chown -R nginx:nginx /var/www/phpmyadmin
+    mkdir -p /var/www/phpmyadmin/tmp && \
+    chown -R nginx:nginx /var/www/phpmyadmin && \
+    chmod -R 755 /var/www/phpmyadmin/tmp
 
 # Create directories for WordPress instances and services
 RUN mkdir -p /wordpress-instances \
@@ -88,6 +84,7 @@ COPY entrypoint.sh /app/
 COPY network-setup.sh /app/
 COPY instance-manager.sh /app/
 COPY install-wordpress.sh /app/
+COPY workspace-manager.sh /app/
 COPY supervisord.conf /etc/supervisord.conf
 COPY nginx-phpmyadmin.conf /etc/nginx/http.d/phpmyadmin.conf
 COPY phpmyadmin-config.inc.php /var/www/phpmyadmin/config.inc.php

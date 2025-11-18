@@ -71,30 +71,48 @@ install_wordpress() {
     local db_user=$(grep "MYSQL_USER:" "$compose_file" | awk '{print $2}')
     local db_password=$(grep "WORDPRESS_DB_PASSWORD:" "$compose_file" | head -1 | awk '{print $2}')
     local db_host="mysql:3306"
-    
+    local container_name="${instance_name}-mysql"
+
+    # Wait for MySQL to be ready
+    print_info "Waiting for MySQL to be ready..."
+    local max_attempts=30
+    local attempt=0
+    while [ $attempt -lt $max_attempts ]; do
+        if docker exec "$container_name" mysqladmin ping -h localhost -u root -p"$(grep "MYSQL_ROOT_PASSWORD:" "$compose_file" | awk '{print $2}')" --silent 2>/dev/null; then
+            print_info "MySQL is ready!"
+            break
+        fi
+        attempt=$((attempt + 1))
+        if [ $attempt -eq $max_attempts ]; then
+            print_error "MySQL failed to start within expected time"
+            return 1
+        fi
+        sleep 2
+    done
+
     print_info "Downloading latest WordPress..."
-    wp core download --path="${wordpress_dir}"
-    
+    docker exec "${instance_name}-php" php -d memory_limit=512M /usr/local/bin/wp core download --path="/var/www/html" --allow-root
+
     print_info "Creating wp-config.php..."
-    wp config create \
-        --path="${wordpress_dir}" \
+    docker exec "${instance_name}-php" wp config create \
+        --path="/var/www/html" \
         --dbname="${db_name}" \
         --dbuser="${db_user}" \
         --dbpass="${db_password}" \
         --dbhost="${db_host}" \
-       
-    
+        --allow-root
+
     # Add additional wp-config.php settings
     print_info "Configuring WordPress settings..."
-    
+
     # Add debugging settings (disabled by default)
-    wp config set WP_DEBUG false --raw --path="${wordpress_dir}"
-    wp config set WP_DEBUG_LOG false --raw --path="${wordpress_dir}"
-    wp config set WP_DEBUG_DISPLAY false --raw --path="${wordpress_dir}"
-    
+    docker exec "${instance_name}-php" wp config set WP_DEBUG false --raw --path="/var/www/html" --allow-root
+    docker exec "${instance_name}-php" wp config set WP_DEBUG_LOG false --raw --path="/var/www/html" --allow-root
+    docker exec "${instance_name}-php" wp config set WP_DEBUG_DISPLAY false --raw --path="/var/www/html" --allow-root
+
     # Add memory limits
-    wp config set WP_MEMORY_LIMIT '256M' --path="${wordpress_dir}"
-    wp config set WP_MAX_MEMORY_LIMIT '512M' --path="${wordpress_dir}"
+    docker exec "${instance_name}-php" wp config set WP_MEMORY_LIMIT '256M' --path="/var/www/html" --allow-root
+    docker exec "${instance_name}-php" wp config set WP_MAX_MEMORY_LIMIT '512M' --path="/var/www/html" --allow-root
     
     # Get site URL (find the mapped port)
     local container_name="${instance_name}-nginx"
@@ -131,21 +149,25 @@ install_wordpress() {
     fi
     
     print_info "Installing WordPress..."
-    wp core install \
-        --path="${wordpress_dir}" \
+    docker exec "${instance_name}-php" wp core install \
+        --path="/var/www/html" \
         --url="${site_url}" \
         --title="${site_title}" \
         --admin_user="${admin_user}" \
         --admin_password="${admin_password}" \
         --admin_email="${admin_email}" \
         --skip-email \
-       
+        --allow-root
     
-    # Set proper permissions
-    print_info "Setting file permissions..."
-    chown -R 82:82 "${wordpress_dir}"  # 82 is www-data user in Alpine
-    find "${wordpress_dir}" -type d -exec chmod 755 {} \;
-    find "${wordpress_dir}" -type f -exec chmod 644 {} \;
+    # Set proper permissions using PUID/PGID from environment
+    # This allows the host user to edit files
+    PUID=${PUID:-82}  # Default to www-data (82) in Alpine
+    PGID=${PGID:-82}
+
+    print_info "Setting file permissions (PUID=${PUID}, PGID=${PGID})..."
+    chown -R ${PUID}:${PGID} "${wordpress_dir}"
+    find "${wordpress_dir}" -type d -exec chmod 775 {} \;
+    find "${wordpress_dir}" -type f -exec chmod 664 {} \;
     
     print_info "WordPress installation completed successfully!"
     echo ""

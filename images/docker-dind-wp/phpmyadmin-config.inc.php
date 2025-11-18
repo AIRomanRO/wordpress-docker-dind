@@ -28,6 +28,11 @@ $cfg['UploadDir'] = '';
 $cfg['SaveDir'] = '';
 
 /**
+ * Temporary directory for caching templates and other data
+ */
+$cfg['TempDir'] = '/var/www/phpmyadmin/tmp/';
+
+/**
  * Whether to display icons or text or both icons and text in table row
  * action segment. Value can be either of 'icons', 'text' or 'both'.
  */
