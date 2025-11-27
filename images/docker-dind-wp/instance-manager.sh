@@ -420,6 +420,12 @@ EOF
     echo -e "  - MySQL: ${instance_dir}/data/mysql/"
     echo -e "  - Logs: ${instance_dir}/data/logs/"
     echo ""
+    echo -e "${YELLOW}Database credentials:${NC}"
+    echo -e "  - Database: wordpress"
+    echo -e "  - User: wordpress"
+    echo -e "  - Password: ${db_password}"
+    echo -e "  - Root Password: ${db_root_password}"
+    echo ""
     echo "To start the instance, run:"
     echo "  $0 start ${name}"
 }

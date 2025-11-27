@@ -16,6 +16,13 @@ $cfg['blowfish_secret'] = 'wp-dind-phpmyadmin-secret-key-32ch';
  */
 $i = 0;
 
+// First server - allow arbitrary server selection
+$i++;
+$cfg['Servers'][$i]['auth_type'] = 'cookie';
+$cfg['Servers'][$i]['host'] = '';
+$cfg['Servers'][$i]['compress'] = false;
+$cfg['Servers'][$i]['AllowNoPassword'] = false;
+
 /**
  * Allow arbitrary server connection
  */
@@ -31,6 +38,11 @@ $cfg['SaveDir'] = '';
  * Temporary directory for caching templates and other data
  */
 $cfg['TempDir'] = '/var/www/phpmyadmin/tmp/';
+
+/**
+ * Session save path
+ */
+ini_set('session.save_path', '/var/www/phpmyadmin/sessions/');
 
 /**
  * Whether to display icons or text or both icons and text in table row

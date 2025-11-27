@@ -57,16 +57,14 @@ COPY wp-cli.yml /root/.wp-cli/config.yml
 ENV WP_CLI_ALLOW_ROOT=1
 
 # Download and install phpMyAdmin
-
-# Download and install phpMyAdmin
 RUN mkdir -p /var/www/phpmyadmin && \
     cd /tmp && \
     curl -L https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.gz | tar xz && \
     mv phpMyAdmin-5.2.3-all-languages/* /var/www/phpmyadmin/ && \
     rm -rf phpMyAdmin-5.2.3-all-languages && \
-    mkdir -p /var/www/phpmyadmin/tmp && \
+    mkdir -p /var/www/phpmyadmin/tmp /var/www/phpmyadmin/sessions && \
     chown -R nginx:nginx /var/www/phpmyadmin && \
-    chmod -R 755 /var/www/phpmyadmin/tmp
+    chmod -R 777 /var/www/phpmyadmin/tmp /var/www/phpmyadmin/sessions
 
 # Create directories for WordPress instances and services
 RUN mkdir -p /wordpress-instances \
