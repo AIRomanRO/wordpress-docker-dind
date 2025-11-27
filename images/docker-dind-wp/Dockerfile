@@ -66,6 +66,9 @@ RUN mkdir -p /var/www/phpmyadmin && \
     chown -R nginx:nginx /var/www/phpmyadmin && \
     chmod -R 777 /var/www/phpmyadmin/tmp /var/www/phpmyadmin/sessions
 
+# Configure PHP upload limits for phpMyAdmin
+COPY php-uploads.ini /etc/php83/conf.d/99-uploads.ini
+
 # Create directories for WordPress instances and services
 RUN mkdir -p /wordpress-instances \
     /shared-images \

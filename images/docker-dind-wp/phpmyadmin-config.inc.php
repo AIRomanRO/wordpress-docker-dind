@@ -151,3 +151,10 @@ $cfg['LimitChars'] = 50;
  * in the doc/ folder or at <https://docs.phpmyadmin.net/>.
  */
 
+
+/**
+ * Maximum upload size (should match PHP settings)
+ * Value in bytes (512MB = 512 * 1024 * 1024)
+ */
+$cfg['UploadMaxFilesize'] = '512M';
+$cfg['MaxSizeForInputField'] = 512 * 1024 * 1024;
