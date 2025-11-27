@@ -269,7 +269,7 @@ program
                     type: 'list',
                     name: 'phpVersion',
                     message: 'PHP version:',
-                    choices: ['8.3', '8.2', '8.1', '8.0', '7.4'],
+                    choices: ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'],
                     default: '8.3'
                 },
                 {
@@ -297,7 +297,7 @@ program
             instances: {},  // For multi-instance mode
             stack: {
                 dindImage: 'airoman/wp-dind:dind-27.0.3',
-                phpVersions: ['7.4', '8.0', '8.1', '8.2', '8.3'],
+                phpVersions: ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'],
                 mysqlVersions: ['5.6', '5.7', '8.0'],
                 webservers: ['nginx', 'apache'],
                 services: {
@@ -314,6 +314,7 @@ program
                 php81: '8.1.31',
                 php82: '8.2.26',
                 php83: '8.3.14',
+                php84: '8.4.1',
                 mysql56: '5.6.51',
                 mysql57: '5.7.44',
                 mysql80: '8.0.40',
@@ -446,7 +447,7 @@ Initialize a new WordPress DinD workspace in the current directory.
 - Workspace name
 - Workspace type (workspace or multi-instance)
 - Web server (nginx or apache) - workspace mode only
-- PHP version (7.4, 8.0, 8.1, 8.2, 8.3) - workspace mode only
+- PHP version (7.4, 8.0, 8.1, 8.2, 8.3, 8.4) - workspace mode only
 - MySQL version (5.6, 5.7, 8.0) - workspace mode only
 
 ### Environment Management
@@ -541,7 +542,7 @@ wp-dind instance create <name> [mysql_version] [php_version] [webserver]
 \`\`\`
 Creates a new isolated WordPress instance.
 - \`mysql_version\`: 56, 57, 80 (default: 80)
-- \`php_version\`: 74, 80, 81, 82, 83 (default: 83)
+- \`php_version\`: 74, 80, 81, 82, 83, 84 (default: 83)
 - \`webserver\`: nginx, apache (default: nginx)
 
 **List instances:**
@@ -1153,12 +1154,23 @@ program
             }
         }
 
-        console.log(chalk.yellow('MySQL Connection:'));
-        console.log(chalk.gray(`  Host: ${dindIP}`));
-        console.log(chalk.gray(`  Port: 3306`));
-        console.log(chalk.gray(`  Database: wordpress`));
-        console.log(chalk.gray(`  Username: wordpress`));
-        console.log(chalk.gray(`  Password: wordpress\n`));
+        // Show MySQL connection info based on workspace type
+        if (workspaceConfig.workspaceType === 'workspace') {
+            // Workspace mode - single MySQL instance with hardcoded credentials
+            console.log(chalk.yellow('MySQL Connection:'));
+            console.log(chalk.gray(`  Host: ${dindIP}`));
+            console.log(chalk.gray(`  Port: 3306`));
+            console.log(chalk.gray(`  Database: wordpress`));
+            console.log(chalk.gray(`  Username: wordpress`));
+            console.log(chalk.gray(`  Password: wordpress`));
+            console.log(chalk.gray(`  Root User: root`));
+            console.log(chalk.gray(`  Root Password: rootpassword\n`));
+        } else {
+            // Multi-instance mode - each instance has its own MySQL with random passwords
+            console.log(chalk.yellow('MySQL Connection:'));
+            console.log(chalk.gray('  Each instance has its own MySQL database with unique random credentials.'));
+            console.log(chalk.gray('  Use "wp-dind instance info <name>" to view credentials for a specific instance.\n'));
+        }
     });
 
 
