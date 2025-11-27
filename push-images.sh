@@ -62,6 +62,7 @@ push_image "wp-php" "8.0.30"
 push_image "wp-php" "8.1.31"
 push_image "wp-php" "8.2.26"
 push_image "wp-php" "8.3.14"
+push_image "wp-php" "8.4.1"
 
 # Push Nginx image
 echo -e "${BLUE}Pushing Nginx image...${NC}"
