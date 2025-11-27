@@ -90,6 +90,51 @@ $cfg['RetainQueryBox'] = false;
 $cfg['AllowArbitraryServer'] = true;
 
 /**
+ * Show PHP information
+ */
+$cfg['ShowPhpInfo'] = true;
+
+/**
+ * Show server information
+ */
+$cfg['ShowServerInfo'] = true;
+
+/**
+ * Show database statistics
+ */
+$cfg['ShowStats'] = true;
+
+/**
+ * Show creation timestamp
+ */
+$cfg['ShowCreateDb'] = true;
+
+/**
+ * Maximum number of databases displayed in database list
+ */
+$cfg['MaxDbList'] = 100;
+
+/**
+ * Maximum number of tables displayed in table list
+ */
+$cfg['MaxTableList'] = 250;
+
+/**
+ * Show hint about the current database
+ */
+$cfg['ShowHint'] = true;
+
+/**
+ * Maximum execution time in seconds (0 for unlimited)
+ */
+$cfg['ExecTimeLimit'] = 300;
+
+/**
+ * Maximum number of characters shown in any non-numeric column on browse view
+ */
+$cfg['LimitChars'] = 50;
+
+/**
  * You can find more configuration options in the documentation
  * in the doc/ folder or at <https://docs.phpmyadmin.net/>.
  */

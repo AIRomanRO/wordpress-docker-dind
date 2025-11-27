@@ -28,6 +28,7 @@ services:
     ports:
       - "${DOCKER_DAEMON_PORT:-2375}:2375"                                                    # Docker daemon
       - "${WP_INSTANCE_PORT_RANGE_START:-8000}-${WP_INSTANCE_PORT_RANGE_END:-8099}:8000-8099" # WordPress instances
+      - "${MYSQL_PORT_RANGE_START:-3306}-${MYSQL_PORT_RANGE_END:-3405}:3306-3405"             # MySQL instances (inside DinD)
       - "${PHPMYADMIN_PORT:-8080}:8080"                                                       # phpMyAdmin (inside DinD)
       - "${MAIL_CATCHER_HTTP_PORT:-1080}:1080"                                                # MailCatcher Web UI (inside DinD)
       - "${MAIL_CATCHER_SMTP_PORT:-1025}:1025"                                                # MailCatcher SMTP (inside DinD)

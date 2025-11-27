@@ -7,6 +7,7 @@ HOST_CONFIG_DIR="/host-config"
 HOST_LOGS_DIR="/host-logs"
 WORKSPACE_CONFIG="/wordpress-instances/.workspace-config.json"
 INSTANCE_PORT_START=8001
+MYSQL_PORT_START=3307
 
 # Default values from environment variables (set in docker-compose-dind.yml from .env)
 DEFAULT_MYSQL_VERSION="${DEFAULT_MYSQL_VERSION:-80}"
@@ -38,6 +39,23 @@ get_next_port() {
     echo "$max_port"
 }
 
+# Function to get next available MySQL port
+get_next_mysql_port() {
+    local max_port=$MYSQL_PORT_START
+
+    # Check workspace config for existing MySQL ports
+    if [ -f "$WORKSPACE_CONFIG" ]; then
+        local ports=$(jq -r '.instances | to_entries[] | .value.mysql_port // empty' "$WORKSPACE_CONFIG" 2>/dev/null)
+        for port in $ports; do
+            if [ "$port" -ge "$max_port" ]; then
+                max_port=$((port + 1))
+            fi
+        done
+    fi
+
+    echo "$max_port"
+}
+
 # Function to save instance to workspace config
 save_instance_to_config() {
     local name=$1
@@ -45,6 +63,7 @@ save_instance_to_config() {
     local webserver=$3
     local php_version=$4
     local mysql_version=$5
+    local mysql_port=$6
 
     if [ ! -f "$WORKSPACE_CONFIG" ]; then
         return 0
@@ -54,11 +73,13 @@ save_instance_to_config() {
     local temp_file=$(mktemp)
     jq --arg name "$name" \
        --arg port "$port" \
+       --arg mysql_port "$mysql_port" \
        --arg webserver "$webserver" \
        --arg php "$php_version" \
        --arg mysql "$mysql_version" \
        '.instances[$name] = {
            "port": ($port | tonumber),
+           "mysql_port": ($mysql_port | tonumber),
            "stack": {
                "webserver": $webserver,
                "phpVersion": $php,
@@ -92,12 +113,14 @@ Commands:
     create <name> [mysql_version] [php_version] [webserver]
                                      Create a new WordPress instance
                                      mysql_version: 56, 57, 80 (default: ${DEFAULT_MYSQL_VERSION})
-                                     php_version: 74, 80, 81, 82, 83 (default: ${DEFAULT_PHP_VERSION})
+                                     php_version: 74, 80, 81, 82, 83, 84 (default: ${DEFAULT_PHP_VERSION})
                                      webserver: nginx, apache (default: ${DEFAULT_WEBSERVER})
 
     start <name>                     Start a WordPress instance
 
     stop <name>                      Stop a WordPress instance
+
+    restart <name>                   Restart a WordPress instance
 
     remove <name>                    Remove a WordPress instance
 
@@ -167,6 +190,7 @@ create_instance() {
         81) php_image_version="8.1.31" ;;
         82) php_image_version="8.2.26" ;;
         83) php_image_version="8.3.14" ;;
+        84) php_image_version="8.4.1" ;;
         *) php_image_version="8.3.14" ;;
     esac
 
@@ -186,6 +210,7 @@ create_instance() {
         81) php_full_version="8.1" ;;
         82) php_full_version="8.2" ;;
         83) php_full_version="8.3" ;;
+        84) php_full_version="8.4" ;;
         *) php_full_version="8.3" ;;
     esac
 
@@ -225,7 +250,11 @@ create_instance() {
 
     # Get next available port
     local instance_port=$(get_next_port)
-    echo -e "${YELLOW}  Assigned port: ${instance_port}${NC}"
+    echo -e "${YELLOW}  Assigned HTTP port: ${instance_port}${NC}"
+
+    # Get next available MySQL port
+    local mysql_port=$(get_next_mysql_port)
+    echo -e "${YELLOW}  Assigned MySQL port: ${mysql_port}${NC}"
 
     # Get next available instance ID for network
     local instance_id=$(find "$INSTANCES_DIR" -maxdepth 1 -type d | wc -l)
@@ -264,6 +293,20 @@ EOF
     # Copy default MySQL configuration from templates
     cp /app/config-templates/mysql/my.cnf "${instance_dir}/config/mysql-${mysql_full_version}/"
 
+    # Create a custom.cnf for user overrides
+    cat > "${instance_dir}/config/mysql-${mysql_full_version}/custom.cnf" << 'EOF'
+[mysqld]
+# Custom MySQL settings
+# Add your custom MySQL configuration here
+# This file will override settings from other configuration files
+
+# Example: Increase max connections
+# max_connections=500
+
+# Example: Increase buffer pool size
+# innodb_buffer_pool_size=512M
+EOF
+
     # Copy default webserver configuration from templates
     if [ "$webserver" = "nginx" ]; then
         cp /app/config-templates/nginx/wordpress.conf "${instance_dir}/config/${webserver}-${webserver_version}/"
@@ -284,6 +327,8 @@ services:
       MYSQL_DATABASE: ${DEFAULT_DB_NAME}
       MYSQL_USER: ${DEFAULT_DB_USER}
       MYSQL_PASSWORD: ${db_password}
+    ports:
+      - "${mysql_port}:3306"
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ${HOST_LOGS_DIR}/${name}/mysql-${mysql_full_version}:/var/log/mysql
@@ -353,7 +398,7 @@ DB_ROOT_PASSWORD=${db_root_password}
 EOF
 
     # Save instance to workspace config
-    save_instance_to_config "$name" "$instance_port" "$webserver" "$php_full_version" "$mysql_full_version"
+    save_instance_to_config "$name" "$instance_port" "$webserver" "$php_full_version" "$mysql_full_version" "$mysql_port"
 
     echo -e "${GREEN}Instance '${name}' created successfully!${NC}"
     echo -e "${YELLOW}Instance directory: ${instance_dir}${NC}"
@@ -362,7 +407,8 @@ EOF
     echo -e "  - PHP: ${php_version}"
     echo -e "  - Web Server: ${webserver}"
     echo -e "  - Network: ${network_name}"
-    echo -e "  - Port: ${instance_port}"
+    echo -e "  - HTTP Port: ${instance_port}"
+    echo -e "  - MySQL Port: ${mysql_port}"
     echo ""
     echo -e "${YELLOW}Configuration files:${NC}"
     echo -e "  - PHP: ${instance_dir}/config/php/php.ini"
@@ -645,6 +691,13 @@ case "${1:-}" in
     stop)
         [ -z "$2" ] && usage
         stop_instance "$2"
+        ;;
+    restart)
+        [ -z "$2" ] && usage
+        echo -e "${YELLOW}Restarting instance '$2'...${NC}"
+        stop_instance "$2"
+        sleep 2
+        start_instance "$2"
         ;;
     remove)
         [ -z "$2" ] && usage

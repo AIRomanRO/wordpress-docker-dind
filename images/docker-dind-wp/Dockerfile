@@ -85,6 +85,7 @@ COPY network-setup.sh /app/
 COPY instance-manager.sh /app/
 COPY install-wordpress.sh /app/
 COPY workspace-manager.sh /app/
+COPY migrate-instances.sh /app/
 COPY supervisord.conf /etc/supervisord.conf
 COPY nginx-phpmyadmin.conf /etc/nginx/http.d/phpmyadmin.conf
 COPY phpmyadmin-config.inc.php /var/www/phpmyadmin/config.inc.php
