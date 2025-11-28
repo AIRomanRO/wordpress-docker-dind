@@ -30,6 +30,12 @@ fi
 export PUID
 export PGID
 
+# Ensure phpMyAdmin directories exist and have proper permissions
+echo "Setting up phpMyAdmin directories..."
+mkdir -p /var/www/phpmyadmin/tmp /var/www/phpmyadmin/sessions
+chown -R nginx:nginx /var/www/phpmyadmin/tmp /var/www/phpmyadmin/sessions
+chmod -R 777 /var/www/phpmyadmin/tmp /var/www/phpmyadmin/sessions
+
 # Start supervisord in the background to manage all services
 /usr/bin/supervisord -c /etc/supervisord.conf &
 SUPERVISOR_PID=$!

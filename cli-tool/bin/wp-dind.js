@@ -269,7 +269,7 @@ program
                     type: 'list',
                     name: 'phpVersion',
                     message: 'PHP version:',
-                    choices: ['8.3', '8.2', '8.1', '8.0', '7.4'],
+                    choices: ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'],
                     default: '8.3'
                 },
                 {
@@ -297,7 +297,7 @@ program
             instances: {},  // For multi-instance mode
             stack: {
                 dindImage: 'airoman/wp-dind:dind-27.0.3',
-                phpVersions: ['7.4', '8.0', '8.1', '8.2', '8.3'],
+                phpVersions: ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'],
                 mysqlVersions: ['5.6', '5.7', '8.0'],
                 webservers: ['nginx', 'apache'],
                 services: {
@@ -314,6 +314,7 @@ program
                 php81: '8.1.31',
                 php82: '8.2.26',
                 php83: '8.3.14',
+                php84: '8.4.1',
                 mysql56: '5.6.51',
                 mysql57: '5.7.44',
                 mysql80: '8.0.40',
@@ -446,7 +447,7 @@ Initialize a new WordPress DinD workspace in the current directory.
 - Workspace name
 - Workspace type (workspace or multi-instance)
 - Web server (nginx or apache) - workspace mode only
-- PHP version (7.4, 8.0, 8.1, 8.2, 8.3) - workspace mode only
+- PHP version (7.4, 8.0, 8.1, 8.2, 8.3, 8.4) - workspace mode only
 - MySQL version (5.6, 5.7, 8.0) - workspace mode only
 
 ### Environment Management
@@ -541,7 +542,7 @@ wp-dind instance create <name> [mysql_version] [php_version] [webserver]
 \`\`\`
 Creates a new isolated WordPress instance.
 - \`mysql_version\`: 56, 57, 80 (default: 80)
-- \`php_version\`: 74, 80, 81, 82, 83 (default: 83)
+- \`php_version\`: 74, 80, 81, 82, 83, 84 (default: 83)
 - \`webserver\`: nginx, apache (default: nginx)
 
 **List instances:**
@@ -893,13 +894,311 @@ program
 
 program
     .command('stop')
-    .description('Stop the WordPress DinD environment')
+    .description('Stop the WordPress DinD environment (keeps containers)')
     .option('-d, --dir <directory>', 'Target directory (default: current directory)')
     .action((options) => {
         const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
         console.log(chalk.blue('Stopping WordPress DinD environment...\n'));
         execCommand('docker-compose stop', { cwd: targetDir });
         console.log(chalk.green('\n✅ Environment stopped successfully!'));
+        console.log(chalk.gray('Note: Containers are stopped but not removed. Use "wp-dind start" to restart.'));
+    });
+
+program
+    .command('down')
+    .description('Stop and remove the WordPress DinD container (keeps data)')
+    .option('-d, --dir <directory>', 'Target directory (default: current directory)')
+    .action((options) => {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+        console.log(chalk.blue('Stopping and removing WordPress DinD container...\n'));
+        execCommand('docker-compose down', { cwd: targetDir });
+        console.log(chalk.green('\n✅ Container removed successfully!'));
+        console.log(chalk.gray('Note: Data is preserved. Use "wp-dind start" to recreate the container.'));
+    });
+
+program
+    .command('restart')
+    .description('Restart the WordPress DinD environment')
+    .option('-d, --dir <directory>', 'Target directory (default: current directory)')
+    .action((options) => {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+        console.log(chalk.blue('Restarting WordPress DinD environment...\n'));
+
+        // Use down and up instead of restart to properly restart the DinD daemon
+        console.log(chalk.gray('Stopping containers...'));
+        execCommand('docker-compose down', { cwd: targetDir });
+
+        console.log(chalk.gray('Starting containers...'));
+        execCommand('docker-compose up -d', { cwd: targetDir });
+
+        console.log(chalk.green('\n✅ Environment restarted successfully!'));
+
+        // Show connection info
+        try {
+            const workspaceConfig = loadWorkspaceConfig(targetDir);
+            const containerName = workspaceConfig ? `wp-dind-${workspaceConfig.workspaceName}` : `wp-dind-${path.basename(targetDir)}`;
+            const ipCmd = `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${containerName}`;
+            const ipResult = require('child_process').execSync(ipCmd, { encoding: 'utf8' }).trim();
+
+            if (ipResult) {
+                console.log(chalk.blue.bold('\n📡 DinD Container IP: ') + chalk.yellow(ipResult));
+                console.log(chalk.gray('Access services at this IP address'));
+            }
+        } catch (error) {
+            // Ignore errors getting IP
+        }
+    });
+
+
+program
+    .command('recreate')
+    .description('Recreate the WordPress DinD environment (fixes ContainerConfig errors)')
+    .option('-d, --dir <directory>', 'Target directory (default: current directory)')
+    .option('--pull', 'Pull latest image before recreating')
+    .action((options) => {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+        console.log(chalk.blue('Recreating WordPress DinD environment...\n'));
+
+        // Load workspace config
+        const workspaceConfig = loadWorkspaceConfig(targetDir);
+        const containerName = workspaceConfig ? `wp-dind-${workspaceConfig.workspaceName}` : `wp-dind-${path.basename(targetDir)}`;
+        const isWorkspaceMode = workspaceConfig?.workspaceType === 'workspace';
+
+        // If workspace mode, stop workspace containers first
+        if (isWorkspaceMode) {
+            console.log(chalk.gray('Stopping workspace containers...'));
+            try {
+                require('child_process').execSync(
+                    `docker exec ${containerName} /app/workspace-manager.sh stop`,
+                    { stdio: 'inherit' }
+                );
+            } catch (error) {
+                console.log(chalk.yellow('Note: Could not stop workspace containers (container may not be running)'));
+            }
+        }
+
+        // Stop and remove containers
+        console.log(chalk.gray('Stopping and removing DinD container...'));
+        execCommand('docker-compose down', { cwd: targetDir });
+
+        // Force remove container if it still exists
+        console.log(chalk.gray(`Ensuring ${containerName} is removed...`));
+        try {
+            require('child_process').execSync(`docker rm -f ${containerName}`, { stdio: 'ignore' });
+        } catch (error) {
+            // Container already removed, ignore
+        }
+
+        // Pull latest image if requested
+        if (options.pull) {
+            console.log(chalk.gray('Pulling latest DinD image...'));
+            const dindImage = workspaceConfig?.dindImage || 'airoman/wp-dind:dind-27.0.3';
+            execCommand(`docker pull ${dindImage}`, { cwd: targetDir });
+        }
+
+        // Start fresh
+        console.log(chalk.gray('Creating fresh DinD container...'));
+        execCommand('docker-compose up -d', { cwd: targetDir });
+
+        // Wait for container to be healthy
+        console.log(chalk.gray('Waiting for DinD container to be ready...'));
+        let retries = 0;
+        const maxRetries = 30;
+        while (retries < maxRetries) {
+            try {
+                const healthCheck = require('child_process').execSync(
+                    `docker inspect --format='{{.State.Health.Status}}' ${containerName}`,
+                    { encoding: 'utf8', stdio: 'pipe' }
+                ).trim();
+
+                if (healthCheck === 'healthy') {
+                    break;
+                }
+            } catch (error) {
+                // Container not ready yet
+            }
+
+            retries++;
+            if (retries >= maxRetries) {
+                console.log(chalk.yellow('Warning: Container health check timeout, continuing anyway...'));
+                break;
+            }
+
+            require('child_process').execSync('sleep 2', { stdio: 'ignore' });
+        }
+
+        // If workspace mode, clean up corrupted temp files and restart workspace
+        if (isWorkspaceMode) {
+            console.log(chalk.gray('Cleaning up workspace temporary files...'));
+            try {
+                // Remove potentially corrupted temp files
+                require('child_process').execSync(
+                    `docker exec ${containerName} sh -c "rm -rf /tmp/workspace-nginx.conf /tmp/workspace-compose.yml"`,
+                    { stdio: 'pipe' }
+                );
+            } catch (error) {
+                // Ignore errors, files may not exist
+            }
+
+            console.log(chalk.gray('Reinitializing workspace...'));
+            try {
+                require('child_process').execSync(
+                    `docker exec ${containerName} /app/workspace-manager.sh start`,
+                    { stdio: 'inherit' }
+                );
+                console.log(chalk.green('✅ Workspace reinitialized successfully!'));
+            } catch (error) {
+                console.log(chalk.red('❌ Failed to reinitialize workspace'));
+                console.log(chalk.yellow('Try running: docker exec ' + containerName + ' /app/workspace-manager.sh start'));
+            }
+        }
+
+        console.log(chalk.green('\n✅ Environment recreated successfully!'));
+
+        // Show connection info
+        try {
+            const ipCmd = `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${containerName}`;
+            const ipResult = require('child_process').execSync(ipCmd, { encoding: 'utf8' }).trim();
+
+            if (ipResult) {
+                console.log(chalk.blue.bold('\n📡 DinD Container IP: ') + chalk.yellow(ipResult));
+                console.log(chalk.gray('Access services at this IP address'));
+
+                if (isWorkspaceMode) {
+                    console.log(chalk.blue.bold('\n🌐 Workspace URL: ') + chalk.yellow(`http://${ipResult}:8000`));
+                    console.log(chalk.gray('Your workspace is ready to use!'));
+                }
+            }
+        } catch (error) {
+            // Ignore errors getting IP
+        }
+
+        // Show status
+        if (isWorkspaceMode) {
+            console.log(chalk.gray('\nWorkspace containers status:'));
+            try {
+                require('child_process').execSync(
+                    `docker exec ${containerName} docker ps --filter "name=workspace-" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"`,
+                    { stdio: 'inherit' }
+                );
+            } catch (error) {
+                // Ignore errors
+            }
+        }
+    });
+program
+    .command('ssh [container]')
+    .description('SSH into the DinD container or a specific service/instance container')
+    .option('-d, --dir <directory>', 'Target directory (default: current directory)')
+    .action((container, options) => {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+
+        // Load workspace config to get container name and workspace type
+        const workspaceConfig = loadWorkspaceConfig(targetDir);
+        const dindContainerName = workspaceConfig ? `wp-dind-${workspaceConfig.workspaceName}` : `wp-dind-${path.basename(targetDir)}`;
+        const workspaceType = workspaceConfig?.workspaceType || 'multi-instance';
+
+        let targetContainer = dindContainerName;
+        let useDockerExecChain = false;
+        let innerContainer = '';
+
+        if (container) {
+            const containerLower = container.toLowerCase();
+
+            // Services that always run inside DinD (shared services)
+            const sharedServices = ['phpmyadmin', 'mailcatcher', 'redis', 'redis-commander'];
+
+            // Workspace mode services (run as nested containers inside DinD)
+            const workspaceServices = ['mysql', 'php', 'nginx', 'apache'];
+
+            if (sharedServices.includes(containerLower)) {
+                // Shared services - connect to DinD container
+                targetContainer = dindContainerName;
+                console.log(chalk.yellow(`Note: ${container} runs inside the main DinD container`));
+
+            } else if (workspaceType === 'workspace' && workspaceServices.includes(containerLower)) {
+                // Workspace mode - services run as nested containers inside DinD
+                // We need to use: docker exec dind docker exec workspace-{service} bash
+                targetContainer = dindContainerName;
+                useDockerExecChain = true;
+                innerContainer = `workspace-${containerLower}`;
+                console.log(chalk.blue(`Connecting to workspace service: ${innerContainer}`));
+
+            } else if (container.includes('-')) {
+                // Full container name provided
+                // Check if it's a workspace container or instance container
+                if (container.startsWith('workspace-')) {
+                    // Workspace container - needs nested exec
+                    targetContainer = dindContainerName;
+                    useDockerExecChain = true;
+                    innerContainer = container;
+                    console.log(chalk.blue(`Connecting to workspace service: ${innerContainer}`));
+                } else {
+                    // Instance container - direct exec
+                    targetContainer = container;
+                }
+
+            } else {
+                // Assume it's an instance name in multi-instance mode
+                // Try to detect if it's nginx or apache by checking running containers
+                try {
+                    const checkNginx = require('child_process').execSync(
+                        `docker exec ${dindContainerName} docker ps --format '{{.Names}}' | grep '^${container}-nginx$'`,
+                        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }
+                    ).trim();
+
+                    if (checkNginx) {
+                        targetContainer = dindContainerName;
+                        useDockerExecChain = true;
+                        innerContainer = `${container}-nginx`;
+                    } else {
+                        targetContainer = dindContainerName;
+                        useDockerExecChain = true;
+                        innerContainer = `${container}-apache`;
+                    }
+                } catch (error) {
+                    // Default to nginx if detection fails
+                    targetContainer = dindContainerName;
+                    useDockerExecChain = true;
+                    innerContainer = `${container}-nginx`;
+                }
+            }
+        }
+
+        // Build and execute the command
+        let cmd;
+        if (useDockerExecChain) {
+            // Nested container - use docker exec chain
+            console.log(chalk.blue(`Connecting to container: ${innerContainer} (inside ${targetContainer})\n`));
+            cmd = `docker exec -it ${targetContainer} docker exec -it ${innerContainer} /bin/bash`;
+        } else {
+            // Direct container access
+            console.log(chalk.blue(`Connecting to container: ${targetContainer}\n`));
+            cmd = `docker exec -it ${targetContainer} /bin/bash`;
+        }
+
+        try {
+            require('child_process').execSync(cmd, {
+                stdio: 'inherit',
+                cwd: targetDir
+            });
+        } catch (error) {
+            // Try with /bin/sh if bash is not available
+            console.log(chalk.yellow('Bash not available, trying with sh...'));
+            const shCmd = cmd.replace('/bin/bash', '/bin/sh');
+            try {
+                require('child_process').execSync(shCmd, {
+                    stdio: 'inherit',
+                    cwd: targetDir
+                });
+            } catch (shError) {
+                console.error(chalk.red(`Failed to connect to container: ${innerContainer || targetContainer}`));
+                console.error(chalk.gray('Make sure the container is running: wp-dind status'));
+                if (useDockerExecChain) {
+                    console.error(chalk.gray(`Check if container exists: docker exec ${targetContainer} docker ps`));
+                }
+            }
+        }
     });
 
 program
@@ -992,12 +1291,23 @@ program
             }
         }
 
-        console.log(chalk.yellow('MySQL Connection:'));
-        console.log(chalk.gray(`  Host: ${dindIP}`));
-        console.log(chalk.gray(`  Port: 3306`));
-        console.log(chalk.gray(`  Database: wordpress`));
-        console.log(chalk.gray(`  Username: wordpress`));
-        console.log(chalk.gray(`  Password: wordpress\n`));
+        // Show MySQL connection info based on workspace type
+        if (workspaceConfig.workspaceType === 'workspace') {
+            // Workspace mode - single MySQL instance with hardcoded credentials
+            console.log(chalk.yellow('MySQL Connection:'));
+            console.log(chalk.gray(`  Host: ${dindIP}`));
+            console.log(chalk.gray(`  Port: 3306`));
+            console.log(chalk.gray(`  Database: wordpress`));
+            console.log(chalk.gray(`  Username: wordpress`));
+            console.log(chalk.gray(`  Password: wordpress`));
+            console.log(chalk.gray(`  Root User: root`));
+            console.log(chalk.gray(`  Root Password: rootpassword\n`));
+        } else {
+            // Multi-instance mode - each instance has its own MySQL with random passwords
+            console.log(chalk.yellow('MySQL Connection:'));
+            console.log(chalk.gray('  Each instance has its own MySQL database with unique random credentials.'));
+            console.log(chalk.gray('  Use "wp-dind instance info <name>" to view credentials for a specific instance.\n'));
+        }
     });
 
 
@@ -1051,12 +1361,12 @@ program
 
 program
     .command('instance <action> [args...]')
-    .description('Manage WordPress instances (create, start, stop, remove, list, info, logs)')
+    .description('Manage WordPress instances (create, start, stop, restart, remove, list, info, logs)')
     .option('-d, --dir <directory>', 'Target directory (default: current directory)')
     .action((action, args, options) => {
         const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
 
-        const validActions = ['create', 'start', 'stop', 'remove', 'list', 'info', 'logs'];
+        const validActions = ['create', 'start', 'stop', 'restart', 'remove', 'list', 'info', 'logs', 'clone'];
         if (!validActions.includes(action)) {
             console.error(chalk.red(`Invalid action: ${action}`));
             console.log(chalk.yellow(`Valid actions: ${validActions.join(', ')}`));
@@ -1335,14 +1645,83 @@ program
 
         console.log(chalk.blue('Destroying WordPress DinD environment...\n'));
 
-        // Stop and remove containers and volumes (if docker-compose.yml exists)
+        // Load workspace config to get container name
+        const workspaceConfig = loadWorkspaceConfig(targetDir);
+        const dindContainerName = workspaceConfig ? `wp-dind-${workspaceConfig.workspaceName}` : `wp-dind-${path.basename(targetDir)}`;
+
+        // First, stop all instances and workspace containers running inside DinD
+        console.log(chalk.blue('Stopping all instances and nested containers...'));
+        try {
+            // Get list of all containers running inside DinD (including stopped ones)
+            const containersCmd = `docker exec ${dindContainerName} docker ps -aq`;
+            const containers = require('child_process').execSync(containersCmd, {
+                encoding: 'utf8',
+                stdio: ['pipe', 'pipe', 'ignore']
+            }).trim();
+
+            if (containers) {
+                console.log(chalk.gray('  Found nested containers, stopping and removing them...'));
+
+                // Stop all running containers first
+                try {
+                    const stopCmd = `docker exec ${dindContainerName} sh -c "docker ps -q | xargs -r docker stop"`;
+                    require('child_process').execSync(stopCmd, {
+                        encoding: 'utf8',
+                        stdio: ['pipe', 'pipe', 'ignore']
+                    });
+                } catch (e) {
+                    // Ignore errors if no running containers
+                }
+
+                // Remove all containers (including stopped ones)
+                try {
+                    const rmCmd = `docker exec ${dindContainerName} sh -c "docker ps -aq | xargs -r docker rm -f"`;
+                    require('child_process').execSync(rmCmd, {
+                        encoding: 'utf8',
+                        stdio: ['pipe', 'pipe', 'ignore']
+                    });
+                } catch (e) {
+                    // Ignore errors
+                }
+
+                // Remove all networks inside DinD (except default ones)
+                try {
+                    const networksCmd = `docker exec ${dindContainerName} sh -c "docker network ls --filter type=custom -q | xargs -r docker network rm"`;
+                    require('child_process').execSync(networksCmd, {
+                        encoding: 'utf8',
+                        stdio: ['pipe', 'pipe', 'ignore']
+                    });
+                } catch (e) {
+                    // Ignore errors
+                }
+
+                console.log(chalk.green('  ✓ Nested containers and networks cleaned up'));
+            } else {
+                console.log(chalk.gray('  No nested containers found'));
+            }
+        } catch (error) {
+            console.log(chalk.yellow('  ⚠️  Could not stop nested containers (DinD may not be running)'));
+        }
+
+        // Now stop and remove the DinD container itself
         const composeFile = path.join(targetDir, 'docker-compose.yml');
         if (fs.existsSync(composeFile)) {
-            console.log(chalk.blue('Stopping and removing containers...'));
+            console.log(chalk.blue('Stopping and removing DinD container...'));
             try {
-                execCommand('docker-compose down -v', { cwd: targetDir });
+                // First, stop and remove containers only (without removing network)
+                execCommand('docker-compose stop', { cwd: targetDir });
+                execCommand('docker-compose rm -f', { cwd: targetDir });
+                console.log(chalk.green('  ✓ DinD container stopped and removed'));
+
+                // Try to remove volumes
+                try {
+                    execCommand('docker-compose down -v --remove-orphans', { cwd: targetDir });
+                } catch (volumeError) {
+                    // If network removal fails, that's okay - it means other instances are using it
+                    console.log(chalk.gray('  ℹ️  Network not removed (may be in use by other instances)'));
+                }
             } catch (error) {
-                console.log(chalk.yellow('⚠️  Could not stop containers (they may not be running)'));
+                console.log(chalk.yellow('  ⚠️  Could not stop DinD container (it may not be running)'));
             }
         } else {
             console.log(chalk.yellow('⚠️  No docker-compose.yml found, skipping container removal'));
@@ -1486,10 +1865,14 @@ program
             console.log(chalk.gray('  Environment:'));
             console.log(chalk.gray('    init              Initialize new workspace'));
             console.log(chalk.gray('    start             Start the environment'));
-            console.log(chalk.gray('    stop              Stop the environment'));
+            console.log(chalk.gray('    stop              Stop the environment (keeps containers)'));
+            console.log(chalk.gray('    down              Stop and remove containers (keeps data)'));
+            console.log(chalk.gray('    restart           Restart the environment'));
+            console.log(chalk.gray('    recreate          Recreate environment (fixes ContainerConfig errors)'));
             console.log(chalk.gray('    status            Check status'));
             console.log(chalk.gray('    ports             List all services and ports'));
-            console.log(chalk.gray('    destroy           Remove everything\n'));
+            console.log(chalk.gray('    ssh [container]   SSH into DinD or instance container'));
+            console.log(chalk.gray('    destroy           Remove everything (containers + data)\n'));
 
             console.log(chalk.gray('  WordPress (Workspace Mode):'));
             console.log(chalk.gray('    install-wordpress Install WordPress in data/wordpress'));
@@ -1501,6 +1884,7 @@ program
             console.log(chalk.gray('    instance info     Show instance details'));
             console.log(chalk.gray('    instance start    Start instance'));
             console.log(chalk.gray('    instance stop     Stop instance'));
+            console.log(chalk.gray('    instance restart  Restart instance'));
             console.log(chalk.gray('    instance remove   Remove instance'));
             console.log(chalk.gray('    instance clone    Clone instance\n'));
 
@@ -1515,11 +1899,23 @@ program
 
             console.log(chalk.yellow('Examples:\n'));
             console.log(chalk.gray('  # Workspace mode (single site)'));
-            console.log(chalk.gray('  wp-dind init && wp-dind start && wp-dind install-wordpress\n'));
+            console.log(chalk.gray('  wp-dind init && wp-dind start && wp-dind install-wordpress'));
+            console.log(chalk.gray('  wp-dind ssh mysql          # SSH into MySQL container'));
+            console.log(chalk.gray('  wp-dind ssh php            # SSH into PHP container'));
+            console.log(chalk.gray('  wp-dind ssh nginx          # SSH into Nginx container\n'));
+
             console.log(chalk.gray('  # Multi-instance mode (multiple sites)'));
             console.log(chalk.gray('  wp-dind init && wp-dind start'));
             console.log(chalk.gray('  wp-dind instance create mysite 80 83 nginx'));
-            console.log(chalk.gray('  wp-dind instance create legacy 57 74 apache\n'));
+            console.log(chalk.gray('  wp-dind instance create legacy 57 74 apache'));
+            console.log(chalk.gray('  wp-dind ssh mysite         # SSH into mysite webserver'));
+            console.log(chalk.gray('  wp-dind ssh mysite-mysql   # SSH into mysite MySQL'));
+            console.log(chalk.gray('  wp-dind ssh mysite-php     # SSH into mysite PHP\n'));
+
+            console.log(chalk.gray('  # Shared services (both modes)'));
+            console.log(chalk.gray('  wp-dind ssh                # SSH into main DinD container'));
+            console.log(chalk.gray('  wp-dind ssh phpmyadmin     # Access phpMyAdmin container'));
+            console.log(chalk.gray('  wp-dind ssh redis          # Access Redis container\n'));
 
             console.log(chalk.yellow('Documentation:\n'));
             console.log(chalk.gray('  See README.md in your workspace directory for full documentation.\n'));

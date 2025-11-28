@@ -16,6 +16,13 @@ $cfg['blowfish_secret'] = 'wp-dind-phpmyadmin-secret-key-32ch';
  */
 $i = 0;
 
+// First server - allow arbitrary server selection
+$i++;
+$cfg['Servers'][$i]['auth_type'] = 'cookie';
+$cfg['Servers'][$i]['host'] = '';
+$cfg['Servers'][$i]['compress'] = false;
+$cfg['Servers'][$i]['AllowNoPassword'] = false;
+
 /**
  * Allow arbitrary server connection
  */
@@ -31,6 +38,11 @@ $cfg['SaveDir'] = '';
  * Temporary directory for caching templates and other data
  */
 $cfg['TempDir'] = '/var/www/phpmyadmin/tmp/';
+
+/**
+ * Session save path
+ */
+ini_set('session.save_path', '/var/www/phpmyadmin/sessions/');
 
 /**
  * Whether to display icons or text or both icons and text in table row
@@ -90,7 +102,59 @@ $cfg['RetainQueryBox'] = false;
 $cfg['AllowArbitraryServer'] = true;
 
 /**
+ * Show PHP information
+ */
+$cfg['ShowPhpInfo'] = true;
+
+/**
+ * Show server information
+ */
+$cfg['ShowServerInfo'] = true;
+
+/**
+ * Show database statistics
+ */
+$cfg['ShowStats'] = true;
+
+/**
+ * Show creation timestamp
+ */
+$cfg['ShowCreateDb'] = true;
+
+/**
+ * Maximum number of databases displayed in database list
+ */
+$cfg['MaxDbList'] = 100;
+
+/**
+ * Maximum number of tables displayed in table list
+ */
+$cfg['MaxTableList'] = 250;
+
+/**
+ * Show hint about the current database
+ */
+$cfg['ShowHint'] = true;
+
+/**
+ * Maximum execution time in seconds (0 for unlimited)
+ */
+$cfg['ExecTimeLimit'] = 300;
+
+/**
+ * Maximum number of characters shown in any non-numeric column on browse view
+ */
+$cfg['LimitChars'] = 50;
+
+/**
  * You can find more configuration options in the documentation
  * in the doc/ folder or at <https://docs.phpmyadmin.net/>.
  */
 
+
+/**
+ * Maximum upload size (should match PHP settings)
+ * Value in bytes (512MB = 512 * 1024 * 1024)
+ */
+$cfg['UploadMaxFilesize'] = '512M';
+$cfg['MaxSizeForInputField'] = 512 * 1024 * 1024;

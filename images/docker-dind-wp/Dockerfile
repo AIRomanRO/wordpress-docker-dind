@@ -57,16 +57,17 @@ COPY wp-cli.yml /root/.wp-cli/config.yml
 ENV WP_CLI_ALLOW_ROOT=1
 
 # Download and install phpMyAdmin
-
-# Download and install phpMyAdmin
 RUN mkdir -p /var/www/phpmyadmin && \
     cd /tmp && \
     curl -L https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.gz | tar xz && \
     mv phpMyAdmin-5.2.3-all-languages/* /var/www/phpmyadmin/ && \
     rm -rf phpMyAdmin-5.2.3-all-languages && \
-    mkdir -p /var/www/phpmyadmin/tmp && \
+    mkdir -p /var/www/phpmyadmin/tmp /var/www/phpmyadmin/sessions && \
     chown -R nginx:nginx /var/www/phpmyadmin && \
-    chmod -R 755 /var/www/phpmyadmin/tmp
+    chmod -R 777 /var/www/phpmyadmin/tmp /var/www/phpmyadmin/sessions
+
+# Configure PHP upload limits for phpMyAdmin
+COPY php-uploads.ini /etc/php83/conf.d/99-uploads.ini
 
 # Create directories for WordPress instances and services
 RUN mkdir -p /wordpress-instances \
@@ -85,6 +86,7 @@ COPY network-setup.sh /app/
 COPY instance-manager.sh /app/
 COPY install-wordpress.sh /app/
 COPY workspace-manager.sh /app/
+COPY migrate-instances.sh /app/
 COPY supervisord.conf /etc/supervisord.conf
 COPY nginx-phpmyadmin.conf /etc/nginx/http.d/phpmyadmin.conf
 COPY phpmyadmin-config.inc.php /var/www/phpmyadmin/config.inc.php

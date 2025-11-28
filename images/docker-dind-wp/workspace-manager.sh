@@ -300,11 +300,11 @@ status_workspace() {
         echo -e "${YELLOW}Workspace mode: disabled${NC}"
         return 0
     fi
-    
+
     get_workspace_stack
     echo -e "${GREEN}Workspace mode: enabled${NC}"
     echo -e "${YELLOW}Stack: ${WEBSERVER}, PHP ${PHP_VERSION}, MySQL ${MYSQL_VERSION}${NC}"
-    
+
     # Check if containers are running
     if docker ps --format '{{.Names}}' | grep -q "^workspace-"; then
         echo -e "${GREEN}Status: running${NC}"
@@ -312,6 +312,26 @@ status_workspace() {
     else
         echo -e "${YELLOW}Status: stopped${NC}"
     fi
+}
+
+# Function to restart workspace (with cleanup)
+restart_workspace() {
+    if ! is_workspace_mode; then
+        echo -e "${YELLOW}Not in workspace mode, skipping workspace restart${NC}"
+        return 0
+    fi
+
+    echo -e "${GREEN}Restarting workspace...${NC}"
+
+    # Stop workspace
+    stop_workspace
+
+    # Clean up potentially corrupted temp files
+    echo -e "${YELLOW}Cleaning up temporary files...${NC}"
+    rm -rf /tmp/workspace-nginx.conf /tmp/workspace-compose.yml
+
+    # Start workspace
+    start_workspace
 }
 
 # Main command handler
@@ -322,11 +342,14 @@ case "${1:-}" in
     stop)
         stop_workspace
         ;;
+    restart)
+        restart_workspace
+        ;;
     status)
         status_workspace
         ;;
     *)
-        echo "Usage: $0 {start|stop|status}"
+        echo "Usage: $0 {start|stop|restart|status}"
         exit 1
         ;;
 esac
