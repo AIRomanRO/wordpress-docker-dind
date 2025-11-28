@@ -949,6 +949,58 @@ program
         }
     });
 
+
+program
+    .command('recreate')
+    .description('Recreate the WordPress DinD environment (fixes ContainerConfig errors)')
+    .option('-d, --dir <directory>', 'Target directory (default: current directory)')
+    .option('--pull', 'Pull latest image before recreating')
+    .action((options) => {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+        console.log(chalk.blue('Recreating WordPress DinD environment...\n'));
+
+        // Load workspace config
+        const workspaceConfig = loadWorkspaceConfig(targetDir);
+        const containerName = workspaceConfig ? `wp-dind-${workspaceConfig.workspaceName}` : `wp-dind-${path.basename(targetDir)}`;
+
+        // Stop and remove containers
+        console.log(chalk.gray('Stopping and removing containers...'));
+        execCommand('docker-compose down', { cwd: targetDir });
+
+        // Force remove container if it still exists
+        console.log(chalk.gray(`Ensuring ${containerName} is removed...`));
+        try {
+            require('child_process').execSync(`docker rm -f ${containerName}`, { stdio: 'ignore' });
+        } catch (error) {
+            // Container already removed, ignore
+        }
+
+        // Pull latest image if requested
+        if (options.pull) {
+            console.log(chalk.gray('Pulling latest DinD image...'));
+            const dindImage = workspaceConfig?.dindImage || 'airoman/wp-dind:dind-27.0';
+            execCommand(`docker pull ${dindImage}`, { cwd: targetDir });
+        }
+
+        // Start fresh
+        console.log(chalk.gray('Creating fresh containers...'));
+        execCommand('docker-compose up -d', { cwd: targetDir });
+
+        console.log(chalk.green('\n✅ Environment recreated successfully!'));
+
+        // Show connection info
+        try {
+            const ipCmd = `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${containerName}`;
+            const ipResult = require('child_process').execSync(ipCmd, { encoding: 'utf8' }).trim();
+
+            if (ipResult) {
+                console.log(chalk.blue.bold('\n📡 DinD Container IP: ') + chalk.yellow(ipResult));
+                console.log(chalk.gray('Access services at this IP address'));
+            }
+        } catch (error) {
+            // Ignore errors getting IP
+        }
+    });
 program
     .command('ssh [container]')
     .description('SSH into the DinD container or a specific service/instance container')
@@ -1731,6 +1783,7 @@ program
             console.log(chalk.gray('    stop              Stop the environment (keeps containers)'));
             console.log(chalk.gray('    down              Stop and remove containers (keeps data)'));
             console.log(chalk.gray('    restart           Restart the environment'));
+            console.log(chalk.gray('    recreate          Recreate environment (fixes ContainerConfig errors)'));
             console.log(chalk.gray('    status            Check status'));
             console.log(chalk.gray('    ports             List all services and ports'));
             console.log(chalk.gray('    ssh [container]   SSH into DinD or instance container'));
