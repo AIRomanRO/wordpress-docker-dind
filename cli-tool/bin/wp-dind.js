@@ -962,9 +962,23 @@ program
         // Load workspace config
         const workspaceConfig = loadWorkspaceConfig(targetDir);
         const containerName = workspaceConfig ? `wp-dind-${workspaceConfig.workspaceName}` : `wp-dind-${path.basename(targetDir)}`;
+        const isWorkspaceMode = workspaceConfig?.workspaceType === 'workspace';
+
+        // If workspace mode, stop workspace containers first
+        if (isWorkspaceMode) {
+            console.log(chalk.gray('Stopping workspace containers...'));
+            try {
+                require('child_process').execSync(
+                    `docker exec ${containerName} /app/workspace-manager.sh stop`,
+                    { stdio: 'inherit' }
+                );
+            } catch (error) {
+                console.log(chalk.yellow('Note: Could not stop workspace containers (container may not be running)'));
+            }
+        }
 
         // Stop and remove containers
-        console.log(chalk.gray('Stopping and removing containers...'));
+        console.log(chalk.gray('Stopping and removing DinD container...'));
         execCommand('docker-compose down', { cwd: targetDir });
 
         // Force remove container if it still exists
@@ -978,13 +992,66 @@ program
         // Pull latest image if requested
         if (options.pull) {
             console.log(chalk.gray('Pulling latest DinD image...'));
-            const dindImage = workspaceConfig?.dindImage || 'airoman/wp-dind:dind-27.0';
+            const dindImage = workspaceConfig?.dindImage || 'airoman/wp-dind:dind-27.0.3';
             execCommand(`docker pull ${dindImage}`, { cwd: targetDir });
         }
 
         // Start fresh
-        console.log(chalk.gray('Creating fresh containers...'));
+        console.log(chalk.gray('Creating fresh DinD container...'));
         execCommand('docker-compose up -d', { cwd: targetDir });
+
+        // Wait for container to be healthy
+        console.log(chalk.gray('Waiting for DinD container to be ready...'));
+        let retries = 0;
+        const maxRetries = 30;
+        while (retries < maxRetries) {
+            try {
+                const healthCheck = require('child_process').execSync(
+                    `docker inspect --format='{{.State.Health.Status}}' ${containerName}`,
+                    { encoding: 'utf8', stdio: 'pipe' }
+                ).trim();
+
+                if (healthCheck === 'healthy') {
+                    break;
+                }
+            } catch (error) {
+                // Container not ready yet
+            }
+
+            retries++;
+            if (retries >= maxRetries) {
+                console.log(chalk.yellow('Warning: Container health check timeout, continuing anyway...'));
+                break;
+            }
+
+            require('child_process').execSync('sleep 2', { stdio: 'ignore' });
+        }
+
+        // If workspace mode, clean up corrupted temp files and restart workspace
+        if (isWorkspaceMode) {
+            console.log(chalk.gray('Cleaning up workspace temporary files...'));
+            try {
+                // Remove potentially corrupted temp files
+                require('child_process').execSync(
+                    `docker exec ${containerName} sh -c "rm -rf /tmp/workspace-nginx.conf /tmp/workspace-compose.yml"`,
+                    { stdio: 'pipe' }
+                );
+            } catch (error) {
+                // Ignore errors, files may not exist
+            }
+
+            console.log(chalk.gray('Reinitializing workspace...'));
+            try {
+                require('child_process').execSync(
+                    `docker exec ${containerName} /app/workspace-manager.sh start`,
+                    { stdio: 'inherit' }
+                );
+                console.log(chalk.green('✅ Workspace reinitialized successfully!'));
+            } catch (error) {
+                console.log(chalk.red('❌ Failed to reinitialize workspace'));
+                console.log(chalk.yellow('Try running: docker exec ' + containerName + ' /app/workspace-manager.sh start'));
+            }
+        }
 
         console.log(chalk.green('\n✅ Environment recreated successfully!'));
 
@@ -996,9 +1063,27 @@ program
             if (ipResult) {
                 console.log(chalk.blue.bold('\n📡 DinD Container IP: ') + chalk.yellow(ipResult));
                 console.log(chalk.gray('Access services at this IP address'));
+
+                if (isWorkspaceMode) {
+                    console.log(chalk.blue.bold('\n🌐 Workspace URL: ') + chalk.yellow(`http://${ipResult}:8000`));
+                    console.log(chalk.gray('Your workspace is ready to use!'));
+                }
             }
         } catch (error) {
             // Ignore errors getting IP
+        }
+
+        // Show status
+        if (isWorkspaceMode) {
+            console.log(chalk.gray('\nWorkspace containers status:'));
+            try {
+                require('child_process').execSync(
+                    `docker exec ${containerName} docker ps --filter "name=workspace-" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"`,
+                    { stdio: 'inherit' }
+                );
+            } catch (error) {
+                // Ignore errors
+            }
         }
     });
 program
